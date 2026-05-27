@@ -5,7 +5,7 @@ import { Endpoints } from '../lib/api'
 
 function Stat({ label, value, color = 'bg-white', hint }) {
   return (
-    <div className={`nb-card p-4 ${color} text-black`}>
+    <div className={`nb-stat p-4 ${color}`}>
       <div className="text-[10px] uppercase font-extrabold tracking-tight">{label}</div>
       <div className="text-3xl font-extrabold mt-1 font-mono leading-none">{value}</div>
       {hint && <div className="text-[10px] opacity-70 mt-1">{hint}</div>}

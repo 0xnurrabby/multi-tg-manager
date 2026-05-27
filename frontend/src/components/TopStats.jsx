@@ -1,6 +1,6 @@
 function Pill({ label, value, color = 'bg-white' }) {
   return (
-    <div className={`nb-card-sm px-3 py-1 ${color} text-black flex items-center gap-2`}>
+    <div className={`nb-stat-sm px-3 py-1 ${color} flex items-center gap-2`}>
       <span className="text-[10px] font-extrabold uppercase">{label}</span>
       <span className="font-mono font-extrabold">{value}</span>
     </div>
@@ -14,7 +14,7 @@ export default function TopStats({ stats, onBellClick }) {
       <Pill label="Connected" value={stats.connected} color="bg-brand-ok" />
       <Pill label="Banned"    value={stats.banned}    color="bg-brand-err" />
       <Pill label="2FA"       value={stats.with_2fa}  color="bg-brand-violet" />
-      <button onClick={onBellClick} className="relative nb-card-sm bg-white px-3 py-1 text-black flex items-center gap-2 hover:translate-x-[1px] hover:translate-y-[1px] transition-transform">
+      <button onClick={onBellClick} className="relative nb-stat-sm bg-white px-3 py-1 flex items-center gap-2 hover:translate-x-[1px] hover:translate-y-[1px] transition-transform">
         <span className="text-[10px] font-extrabold uppercase">Alerts</span>
         <span className="font-mono font-extrabold">{stats.unread_security}</span>
         {stats.unread_security > 0 && (

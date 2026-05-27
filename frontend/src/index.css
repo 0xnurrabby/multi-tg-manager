@@ -21,6 +21,13 @@ body {
   .nb-card-sm {
     @apply bg-white dark:bg-zinc-900 border-2 border-black dark:border-white shadow-nbsm dark:shadow-nbdarksm rounded-none;
   }
+  /* Colored "stat" card whose background color is preserved in dark mode. */
+  .nb-stat {
+    @apply border-2 border-black dark:border-white shadow-nb dark:shadow-nbdark rounded-none text-black;
+  }
+  .nb-stat-sm {
+    @apply border-2 border-black dark:border-white shadow-nbsm dark:shadow-nbdarksm rounded-none text-black;
+  }
   .nb-btn {
     @apply inline-flex items-center justify-center gap-2 px-3 py-2 font-bold uppercase tracking-tight text-sm
            bg-white dark:bg-zinc-900 text-black dark:text-white
