@@ -86,6 +86,7 @@ export const Endpoints = {
     api.get('/api/security/messages', { account_id: accountId, only_unread: onlyUnread }),
   markRead: (id) => api.post(`/api/security/messages/${id}/read`),
   markAllRead: (accountId) => api.post('/api/security/messages/mark_all_read' + (accountId ? `?account_id=${accountId}` : '')),
+  backfillSecurity: (accountId, limit = 50) => api.post(`/api/security/messages/${accountId}/backfill?limit=${limit}`),
   tgSessions: (id) => api.get(`/api/security/sessions/${id}`),
   terminateSession: (id, hash) => api.del(`/api/security/sessions/${id}/${hash}`),
   terminateOthers: (id) => api.post(`/api/security/sessions/${id}/terminate_others`),
@@ -95,6 +96,10 @@ export const Endpoints = {
   listGroups: (id) => api.get(`/api/groups/${id}/list`),
   leaveGroup: (id, chat_id) => api.post(`/api/groups/${id}/leave`, { chat_id }),
   bulkLeave: (ids, chat_id) => api.post('/api/groups/bulk_leave', { account_ids: ids, chat_id }),
+  countMyMessages: (id, chat_id, max_scan = 1000) =>
+    api.get(`/api/groups/${id}/my_messages_count`, { chat_id, max_scan }),
+  deleteMyMessages: (id, chat_id, max_scan = 2000) =>
+    api.post(`/api/groups/${id}/delete_my_messages?chat_id=${chat_id}&max_scan=${max_scan}`),
 
   sendMessage: (id, target, text) => api.post(`/api/messaging/${id}/send`, { target, text }),
   bulkSend: (ids, target, text) => api.post('/api/messaging/bulk_send', { account_ids: ids, target, text }),

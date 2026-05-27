@@ -166,3 +166,54 @@ async def bulk_leave(body: BulkLeaveIn, db: AsyncSession = Depends(get_db)):
         if idx < len(accounts) - 1:
             await jitter_delay(3, 5)
     return {"success": success, "failed": failed, "skipped": skipped, "results": results}
+
+
+@router.get("/{account_id}/my_messages_count")
+async def count_my_messages(account_id: int, chat_id: int, max_scan: int = 1000):
+    """Count how many messages the logged-in user has in the given chat
+    (scans up to max_scan recent messages)."""
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    try:
+        entity = await cli.get_entity(chat_id)
+        me = await cli.get_me()
+        count = 0
+        async for msg in cli.iter_messages(entity, from_user=me, limit=min(max(max_scan, 1), 5000)):
+            count += 1
+        return {"count": count, "scanned_limit": max_scan}
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{account_id}/delete_my_messages")
+async def delete_my_messages(account_id: int, chat_id: int, max_scan: int = 2000):
+    """Delete every message the logged-in user sent in the given chat
+    (for everyone, revoke=True). Scans up to max_scan recent messages."""
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    try:
+        entity = await cli.get_entity(chat_id)
+        me = await cli.get_me()
+        ids: list[int] = []
+        async for msg in cli.iter_messages(entity, from_user=me, limit=min(max(max_scan, 1), 10000)):
+            ids.append(msg.id)
+        if not ids:
+            return {"deleted": 0, "scanned_limit": max_scan}
+        # Telegram limits delete batches to 100
+        deleted = 0
+        for i in range(0, len(ids), 100):
+            batch = ids[i:i+100]
+            try:
+                res = await cli.delete_messages(entity, batch, revoke=True)
+                # res can be list or PtsCountInt; treat success per id
+                deleted += len(batch)
+            except FloodWaitError as e:
+                raise HTTPException(429, f"FloodWait: wait {e.seconds}s after {deleted} deleted")
+        _cache.pop(account_id, None)
+        return {"deleted": deleted, "scanned_limit": max_scan}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, str(e))

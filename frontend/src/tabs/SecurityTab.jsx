@@ -47,6 +47,15 @@ function AccountRow({ account, onChange }) {
     try { await Endpoints.terminateOthers(account.id); await load() } catch (e) { toast.error(e.message) }
   }
 
+  async function backfill() {
+    setLoading(true)
+    try {
+      await Endpoints.backfillSecurity(account.id, 50)
+      await load()
+      toast.success('Pulled latest messages from Telegram')
+    } catch (e) { toast.error(e.message) } finally { setLoading(false) }
+  }
+
   return (
     <div className="nb-card-sm mb-3">
       <div
@@ -66,13 +75,21 @@ function AccountRow({ account, onChange }) {
       </div>
       {open && (
         <div className="px-4 pb-4 border-t-2 border-black dark:border-white">
-          <div className="mt-3 flex items-center gap-2">
-            <span className="font-bold text-sm uppercase">777000 messages</span>
-            <button className="nb-btn !py-1 !px-2 text-xs ml-auto" onClick={markAllRead}>Mark all read</button>
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className="font-bold text-sm uppercase">Telegram service messages</span>
+            <span className="text-[10px] opacity-60">from "Telegram" (+42777, user_id 777000)</span>
+            <button className="nb-btn !py-1 !px-2 text-xs ml-auto" onClick={backfill} disabled={loading}>
+              {loading ? '…' : 'Pull latest 50'}
+            </button>
+            <button className="nb-btn !py-1 !px-2 text-xs" onClick={markAllRead}>Mark all read</button>
             <button className="nb-btn !py-1 !px-2 text-xs" onClick={load}>Refresh</button>
           </div>
           {loading && <div className="text-sm opacity-60 mt-2">Loading…</div>}
-          {!loading && msgs.length === 0 && <div className="text-sm opacity-60 mt-2">No messages from Telegram.</div>}
+          {!loading && msgs.length === 0 && (
+            <div className="text-sm opacity-60 mt-2">
+              No messages from Telegram yet. Try "Pull latest 50" to fetch history from Telegram.
+            </div>
+          )}
           <div className="space-y-2 mt-2">
             {msgs.map((m) => (
               <div key={m.id} className={'nb-card-sm p-3 ' + (m.is_read ? 'opacity-60' : '')}>
@@ -129,7 +146,7 @@ export default function SecurityTab({ accounts, onChange }) {
       <div className="nb-card p-4 mb-4">
         <div className="font-extrabold uppercase">Security Center</div>
         <div className="text-sm opacity-70">
-          All messages from Telegram service account (777000) per account. New messages also trigger a desktop notification.
+          All messages from the official Telegram service account (shown in your phone as <b>"Telegram"</b> / <b>+42777</b>, internal user_id <b>777000</b>) — per account. New messages also trigger a desktop notification. Use "Pull latest 50" to backfill history for a newly added account.
         </div>
       </div>
       {accounts.length === 0 && <div className="opacity-60">No accounts.</div>}

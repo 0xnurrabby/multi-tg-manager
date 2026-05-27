@@ -67,6 +67,29 @@ export default function GroupsTab({ accounts, selected }) {
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
+  async function deleteMyMessages(chat_id, title) {
+    if (!selected) return
+    setBusy(true)
+    try {
+      toast.info('Counting your messages in this chat...')
+      const cnt = await Endpoints.countMyMessages(selected.id, chat_id, 2000)
+      if (cnt.count === 0) {
+        toast.info('No messages found from you in this chat (last 2000 scanned)')
+        setBusy(false)
+        return
+      }
+      if (!confirm(
+        `Delete ALL ${cnt.count} message(s) you sent in "${title}"?\n\n` +
+        `This is PERMANENT and removes them for everyone (revoke=true).\n\n` +
+        `Account: ${(selected.first_name || selected.phone)}\n` +
+        `Scanned: last 2000 messages.`
+      )) { setBusy(false); return }
+      const r = await Endpoints.deleteMyMessages(selected.id, chat_id, 2000)
+      toast.success(`Deleted ${r.deleted} messages from "${title}"`)
+      await loadGroups(selected.id)
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
   const toggleId = (id) => setBulkIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
 
   return (
@@ -114,6 +137,10 @@ export default function GroupsTab({ accounts, selected }) {
                     {g.members != null && <span>• {g.members.toLocaleString()} members</span>}
                   </div>
                 </div>
+                <button className="nb-btn-err !py-1 !px-2 text-xs" title="Delete every message YOU sent here (revoke for everyone)"
+                  onClick={() => deleteMyMessages(g.id, g.title)} disabled={busy}>
+                  Del My Msgs
+                </button>
                 <button className="nb-btn-err !py-1 !px-2 text-xs" onClick={() => leaveOne(g.id)}>Leave</button>
                 <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => bulkLeave(g.id)}>Bulk Leave</button>
               </div>

@@ -106,6 +106,11 @@ class TgClientManager:
                 await self._sync_profile(acc.id, me)
             except Exception:
                 pass
+            # backfill recent 777000 messages we may have missed while offline
+            try:
+                await self._backfill_777000(acc.id, cli, limit=50)
+            except Exception as e:
+                log.warning("backfill 777000 for %s: %s", acc.phone, e)
             return cli
 
     async def stop_client(self, account_id: int):
@@ -272,6 +277,40 @@ class TgClientManager:
             except Exception:
                 pass
             await db.commit()
+
+    async def _backfill_777000(self, account_id: int, cli: TelegramClient, limit: int = 50):
+        """Read recent messages from 777000 and persist any we don't yet have.
+        Marks them as already-read so the user isn't flooded with old alerts."""
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(SecurityMessage.tg_msg_id).where(SecurityMessage.account_id == account_id)
+            )
+            seen = {row[0] for row in res.all()}
+        added = 0
+        try:
+            async for msg in cli.iter_messages(SERVICE_ID, limit=limit):
+                if msg.id in seen:
+                    continue
+                text = msg.message or ""
+                if not text:
+                    continue
+                m_type = classify_777000(text)
+                async with AsyncSessionLocal() as db:
+                    sm = SecurityMessage(
+                        account_id=account_id,
+                        tg_msg_id=msg.id,
+                        message_text=text,
+                        type=m_type,
+                        is_read=True,  # backfilled history: don't spam unread
+                        received_at=msg.date.replace(tzinfo=None) if msg.date else datetime.utcnow(),
+                    )
+                    db.add(sm)
+                    await db.commit()
+                added += 1
+        except Exception as e:
+            log.warning("backfill iter failed for account %s: %s", account_id, e)
+        if added:
+            log.info("backfilled %d 777000 messages for account %s", added, account_id)
 
     async def refresh_status_all(self):
         for aid, cli in list(self._clients.items()):

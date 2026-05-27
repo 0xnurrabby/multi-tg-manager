@@ -43,6 +43,20 @@ async def mark_all_read(account_id: int | None = None, db: AsyncSession = Depend
     return {"ok": True}
 
 
+@router.post("/messages/{account_id}/backfill")
+async def backfill(account_id: int, limit: int = 50):
+    """Pull recent messages from 777000 for this account.
+    Useful after first login (to see history) or when listener missed something."""
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    try:
+        await manager._backfill_777000(account_id, cli, limit=min(max(limit, 1), 200))
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True}
+
+
 @router.get("/sessions/{account_id}", response_model=list[TgSessionOut])
 async def list_sessions(account_id: int):
     cli = manager.get(account_id)
