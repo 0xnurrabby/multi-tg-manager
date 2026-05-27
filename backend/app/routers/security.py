@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from telethon.tl.functions.account import GetAuthorizationsRequest, ResetAuthorizationRequest, ResetAuthorizationsRequest
+from telethon.tl.functions.account import GetAuthorizationsRequest, ResetAuthorizationRequest
 from datetime import datetime
 
 from ..db import get_db
@@ -82,7 +82,16 @@ async def terminate_others(account_id: int):
     if not cli:
         raise HTTPException(409, "Account not connected")
     try:
-        await cli(ResetAuthorizationsRequest())
+        res = await cli(GetAuthorizationsRequest())
+        killed = 0
+        for a in res.authorizations:
+            if a.current:
+                continue
+            try:
+                await cli(ResetAuthorizationRequest(hash=a.hash))
+                killed += 1
+            except Exception:
+                pass
     except Exception as e:
         raise HTTPException(400, str(e))
-    return {"ok": True}
+    return {"ok": True, "terminated": killed}

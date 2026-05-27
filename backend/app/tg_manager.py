@@ -14,7 +14,7 @@ from telethon.errors import (
     UserDeactivatedError,
     RPCError,
 )
-from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest, GetAuthorizationsRequest, ResetAuthorizationRequest, ResetAuthorizationsRequest
+from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
 from telethon.tl.functions.photos import UploadProfilePhotoRequest
 from telethon.tl.types import User as TgUser
 from sqlalchemy import select
