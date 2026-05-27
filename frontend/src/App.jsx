@@ -1,0 +1,161 @@
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Endpoints, onUnauthorized } from './lib/api'
+import { useToast } from './lib/toast.jsx'
+import { useTheme } from './lib/theme'
+import { ensureNotificationPermission, desktopNotify } from './lib/util'
+import LoginScreen from './components/LoginScreen.jsx'
+import Sidebar from './components/Sidebar.jsx'
+import TopStats from './components/TopStats.jsx'
+import AddAccountModal from './components/AddAccountModal.jsx'
+import DashboardTab from './tabs/DashboardTab.jsx'
+import ProfileTab from './tabs/ProfileTab.jsx'
+import SecurityTab from './tabs/SecurityTab.jsx'
+import GroupsTab from './tabs/GroupsTab.jsx'
+import MessagingTab from './tabs/MessagingTab.jsx'
+import BulkTab from './tabs/BulkTab.jsx'
+import SettingsTab from './tabs/SettingsTab.jsx'
+
+const TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'profile',   label: 'Profile'   },
+  { id: 'security',  label: 'Security'  },
+  { id: 'groups',    label: 'Groups'    },
+  { id: 'messages',  label: 'Messages'  },
+  { id: 'bulk',      label: 'Bulk'      },
+  { id: 'settings',  label: 'Settings'  },
+]
+
+export default function App() {
+  const toast = useToast()
+  const { theme, toggle } = useTheme()
+  const [authState, setAuthState] = useState('checking') // checking | in | out
+  const [accounts, setAccounts] = useState([])
+  const [stats, setStats] = useState({ total: 0, connected: 0, banned: 0, with_2fa: 0, unread_security: 0 })
+  const [selectedId, setSelectedId] = useState(null)
+  const [tab, setTab] = useState('dashboard')
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [addOpen, setAddOpen] = useState(false)
+  const prevUnreadRef = useRef(0)
+
+  // initial auth check
+  useEffect(() => {
+    Endpoints.me()
+      .then((r) => setAuthState(r?.authed ? 'in' : 'out'))
+      .catch(() => setAuthState('out'))
+  }, [])
+
+  // global 401 handler: kick back to login
+  useEffect(() => onUnauthorized(() => {
+    setAuthState('out')
+    setAccounts([]); setSelectedId(null)
+  }), [])
+
+  async function logout() {
+    try { await Endpoints.logout() } catch {}
+    setAuthState('out')
+    setAccounts([]); setSelectedId(null)
+    prevUnreadRef.current = 0
+  }
+
+  const refreshAccounts = useCallback(async () => {
+    try {
+      const list = await Endpoints.accounts()
+      setAccounts(list)
+      if (!selectedId && list.length) setSelectedId(list[0].id)
+    } catch (e) { toast.error('Load accounts: ' + e.message) }
+  }, [selectedId, toast])
+
+  const refreshStats = useCallback(async () => {
+    try {
+      const s = await Endpoints.stats()
+      setStats(s)
+      if (s.unread_security > prevUnreadRef.current && prevUnreadRef.current !== 0) {
+        desktopNotify('New security message', `Unread: ${s.unread_security}`)
+      }
+      prevUnreadRef.current = s.unread_security
+    } catch (e) { /* silent */ }
+  }, [])
+
+  useEffect(() => {
+    if (authState !== 'in') return
+    ensureNotificationPermission()
+    refreshAccounts()
+    refreshStats()
+    const id = setInterval(() => { refreshAccounts(); refreshStats() }, 30000)
+    return () => clearInterval(id)
+  }, [authState, refreshAccounts, refreshStats])
+
+  if (authState === 'checking') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-100 dark:bg-zinc-950">
+        <div className="nb-card-sm p-4 font-bold uppercase tracking-tight">Loading…</div>
+      </div>
+    )
+  }
+  if (authState === 'out') {
+    return <LoginScreen onAuthed={() => setAuthState('in')} />
+  }
+
+  const selected = accounts.find((a) => a.id === selectedId) || null
+
+  return (
+    <div className="h-screen w-screen flex flex-col">
+      <header className="border-b-2 border-black dark:border-white bg-brand-pri text-black flex items-center px-4 py-2 gap-3">
+        <button onClick={() => setSidebarOpen((s) => !s)} className="nb-btn !bg-white !text-black !py-1 !px-2">
+          ☰
+        </button>
+        <h1 className="font-extrabold text-xl uppercase tracking-tighter">Multi TG Manager</h1>
+        <div className="flex-1" />
+        <TopStats stats={stats} onBellClick={() => setTab('security')} />
+        <button onClick={toggle} className="nb-btn !bg-white !text-black !py-1 !px-2" title="Toggle theme">
+          {theme === 'dark' ? '☀' : '☾'}
+        </button>
+        <button onClick={logout} className="nb-btn !bg-white !text-black !py-1 !px-2" title="Logout">
+          ⏻
+        </button>
+      </header>
+
+      <div className="flex-1 flex min-h-0">
+        {sidebarOpen && (
+          <Sidebar
+            accounts={accounts}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onAdd={() => setAddOpen(true)}
+            onDeleted={refreshAccounts}
+          />
+        )}
+
+        <main className="flex-1 min-w-0 flex flex-col">
+          <nav className="flex gap-1 px-4 pt-3 flex-wrap border-b-2 border-black dark:border-white bg-zinc-100 dark:bg-zinc-900">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                className={`nb-tab ${tab === t.id ? 'nb-tab-active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </nav>
+          <div className="flex-1 min-h-0 overflow-auto p-4">
+            {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={(id) => { setSelectedId(id); setTab('profile') }} />}
+            {tab === 'profile'   && <ProfileTab account={selected} onRefresh={refreshAccounts} />}
+            {tab === 'security'  && <SecurityTab accounts={accounts} onChange={refreshStats} />}
+            {tab === 'groups'    && <GroupsTab accounts={accounts} selected={selected} />}
+            {tab === 'messages'  && <MessagingTab accounts={accounts} selected={selected} />}
+            {tab === 'bulk'      && <BulkTab accounts={accounts} onDone={refreshAccounts} />}
+            {tab === 'settings'  && <SettingsTab />}
+          </div>
+        </main>
+      </div>
+
+      {addOpen && (
+        <AddAccountModal
+          onClose={() => setAddOpen(false)}
+          onAdded={() => { setAddOpen(false); refreshAccounts(); refreshStats() }}
+        />
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.installed
+app.db
+app.db-journal
+sessions/
+*.session
+*.session-journal
+node_modules/
+dist/
+backend/static/
+.vite/
+.DS_Store
+*.log
