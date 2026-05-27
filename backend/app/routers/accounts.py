@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
+import asyncio
 
 from ..db import get_db, AsyncSessionLocal
 from ..models import Account, SecurityMessage, PendingLogin
@@ -73,44 +74,27 @@ async def stats(db: AsyncSession = Depends(get_db)):
 
 # ----- Auth -----
 @router.post("/auth/send_code")
-async def send_code(body: SendCodeIn, db: AsyncSession = Depends(get_db)):
+async def send_code(body: SendCodeIn):
     try:
-        phone_code_hash = await manager.send_code(body.phone)
+        await asyncio.wait_for(manager.send_code(body.phone), timeout=45)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram took too long to respond. Try again.")
     except Exception as e:
         raise HTTPException(400, f"send_code failed: {e}")
-    pl = await db.get(PendingLogin, body.phone)
-    if pl:
-        pl.phone_code_hash = phone_code_hash
-        pl.created_at = datetime.utcnow()
-    else:
-        db.add(PendingLogin(phone=body.phone, phone_code_hash=phone_code_hash))
-    await db.commit()
     return {"ok": True}
 
 
-@router.post("/auth/sign_in", response_model=AccountOut)
-async def sign_in(body: SignInIn, db: AsyncSession = Depends(get_db)):
-    pl = await db.get(PendingLogin, body.phone)
-    if not pl:
-        raise HTTPException(400, "No pending login. Call send_code first.")
-    try:
-        me = await manager.sign_in(body.phone, body.code, pl.phone_code_hash, body.password)
-    except Exception as e:
-        from telethon.errors import SessionPasswordNeededError
-        if isinstance(e, SessionPasswordNeededError):
-            raise HTTPException(401, "2FA password required")
-        raise HTTPException(400, f"sign_in failed: {e}")
-
-    res = await db.execute(select(Account).where(Account.phone == body.phone))
+async def _persist_account(db: AsyncSession, phone: str, me) -> Account:
+    res = await db.execute(select(Account).where(Account.phone == phone))
     acc = res.scalar_one_or_none()
     if not acc:
         acc = Account(
-            phone=body.phone,
+            phone=phone,
             tg_user_id=me.id,
             first_name=me.first_name or "",
             last_name=me.last_name or "",
             username=me.username or "",
-            session_file=f"acc_{body.phone}",
+            session_file=f"acc_{phone}",
             status="connected",
         )
         db.add(acc)
@@ -120,13 +104,60 @@ async def sign_in(body: SignInIn, db: AsyncSession = Depends(get_db)):
         acc.last_name = me.last_name or ""
         acc.username = me.username or ""
         acc.status = "connected"
-    await db.delete(pl)
     await db.commit()
     await db.refresh(acc)
-
     try:
         await manager.start_client(acc)
     except Exception:
         pass
+    return acc
 
-    return await _account_to_out(acc, db)
+
+@router.post("/auth/sign_in")
+async def sign_in(body: SignInIn, db: AsyncSession = Depends(get_db)):
+    """Step 1: submit the SMS code. If 2FA is enabled, returns
+    {"needs_2fa": true} with HTTP 200 (NOT 401, which would log the user out)."""
+    try:
+        me, needs_2fa = await asyncio.wait_for(
+            manager.submit_code(body.phone, body.code), timeout=45
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram took too long. Try again.")
+    except Exception as e:
+        raise HTTPException(400, f"sign_in failed: {e}")
+
+    if needs_2fa:
+        return {"needs_2fa": True}
+
+    acc = await _persist_account(db, body.phone, me)
+    out = await _account_to_out(acc, db)
+    return {"needs_2fa": False, "account": out.model_dump(mode="json")}
+
+
+@router.post("/auth/sign_in_2fa")
+async def sign_in_2fa(body: SignInIn, db: AsyncSession = Depends(get_db)):
+    """Step 2: submit 2FA password. Phone is the same one passed to /sign_in earlier."""
+    if not body.password:
+        raise HTTPException(400, "password required")
+    try:
+        me = await asyncio.wait_for(
+            manager.submit_2fa(body.phone, body.password), timeout=45
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram took too long. Try again.")
+    except Exception as e:
+        # Likely wrong password. Keep pending session alive so user can retry.
+        msg = str(e)
+        if "PASSWORD" in msg.upper() or "password" in msg:
+            raise HTTPException(400, "Wrong 2FA password")
+        raise HTTPException(400, f"2FA failed: {e}")
+
+    acc = await _persist_account(db, body.phone, me)
+    out = await _account_to_out(acc, db)
+    return {"account": out.model_dump(mode="json")}
+
+
+@router.post("/auth/cancel")
+async def auth_cancel(body: SendCodeIn):
+    await manager.cancel_pending(body.phone)
+    return {"ok": True}

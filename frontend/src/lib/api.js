@@ -4,7 +4,7 @@ const BASE = ''  // proxied by vite
 const _onUnauth = new Set()
 export function onUnauthorized(cb) { _onUnauth.add(cb); return () => _onUnauth.delete(cb) }
 
-async function request(method, path, { json, form, query } = {}) {
+async function request(method, path, { json, form, query, silent } = {}) {
   let url = path
   if (query) {
     const q = new URLSearchParams(
@@ -19,7 +19,16 @@ async function request(method, path, { json, form, query } = {}) {
   } else if (form) {
     opts.body = form
   }
-  const r = await fetch(BASE + url, opts)
+  let r
+  try {
+    r = await fetch(BASE + url, opts)
+  } catch (netErr) {
+    // network/CORS/abort — surface a cleaner message
+    const e = new Error('Cannot reach server')
+    e.status = 0
+    e.network = true
+    throw e
+  }
   let body = null
   try { body = await r.json() } catch { /* may not be json */ }
   if (r.status === 401 && !path.startsWith('/api/auth-app/')) {
@@ -52,7 +61,9 @@ export const Endpoints = {
   deleteAccount: (id) => api.del(`/api/accounts/${id}`),
 
   sendCode: (phone) => api.post('/api/auth/send_code', { phone }),
-  signIn: (phone, code, password) => api.post('/api/auth/sign_in', { phone, code, password }),
+  signIn: (phone, code) => api.post('/api/auth/sign_in', { phone, code }),
+  signIn2fa: (phone, password) => api.post('/api/auth/sign_in_2fa', { phone, code: '', password }),
+  authCancel: (phone) => api.post('/api/auth/cancel', { phone }),
 
   updateProfile: (id, payload) => api.put(`/api/accounts/${id}/profile`, payload),
   checkUsername: (id, username) => api.get(`/api/accounts/${id}/profile/check_username`, { username }),
@@ -64,9 +75,10 @@ export const Endpoints = {
   },
 
   bulkProfile: (payload) => api.post('/api/bulk/profile', payload),
-  bulkPhoto: (ids, file) => {
-    const fd = new FormData(); fd.append('account_ids', ids.join(','))
-    fd.append('file', file)
+  bulkPhoto: (ids, files) => {
+    const fd = new FormData()
+    fd.append('account_ids', ids.join(','))
+    for (const f of files) fd.append('files', f)
     return api.postForm('/api/bulk/photo', fd)
   },
 

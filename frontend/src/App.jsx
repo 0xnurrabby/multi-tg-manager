@@ -62,8 +62,13 @@ export default function App() {
       const list = await Endpoints.accounts()
       setAccounts(list)
       if (!selectedId && list.length) setSelectedId(list[0].id)
-    } catch (e) { toast.error('Load accounts: ' + e.message) }
-  }, [selectedId, toast])
+    } catch (e) {
+      // Stay silent on polling failures — only show error on first-load
+      if (accounts.length === 0 && !e.network && e.status !== 401) {
+        toast.error('Load accounts: ' + e.message)
+      }
+    }
+  }, [selectedId, toast, accounts.length])
 
   const refreshStats = useCallback(async () => {
     try {

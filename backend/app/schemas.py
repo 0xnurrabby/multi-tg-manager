@@ -61,6 +61,8 @@ class BulkProfileIn(BaseModel):
     bio: Optional[str] = None
     append_number: bool = False  # if true: "Name 1", "Name 2"
     start_number: int = 1
+    # Per-account overrides: {"<account_id>": {"first_name": "...", "last_name": "...", "bio": "..."}}
+    per_account: Optional[dict[str, dict[str, Optional[str]]]] = None
 
 
 class BulkPhotoIn(BaseModel):

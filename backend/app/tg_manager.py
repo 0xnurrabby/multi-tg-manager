@@ -44,6 +44,7 @@ def classify_777000(text: str) -> str:
 class TgClientManager:
     def __init__(self):
         self._clients: dict[int, TelegramClient] = {}  # account_id -> client
+        self._pending: dict[str, dict] = {}  # phone -> {'client', 'phone_code_hash', 'needs_2fa'}
         self._lock = asyncio.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._new_msg_callbacks: list = []
@@ -80,7 +81,11 @@ class TgClientManager:
                 await cli.disconnect()
             except Exception:
                 pass
+        for pend in list(self._pending.values()):
+            try: await pend['client'].disconnect()
+            except Exception: pass
         self._clients.clear()
+        self._pending.clear()
 
     async def start_client(self, acc: Account) -> TelegramClient:
         async with self._lock:
@@ -128,31 +133,73 @@ class TgClientManager:
                         pass
 
     # ---------- auth flow ----------
+    # Pending logins are clients that successfully sent a code OR successfully
+    # passed the code step but need a 2FA password. Keyed by phone.
+    # Each entry: { 'client': TelegramClient, 'phone_code_hash': str, 'needs_2fa': bool }
+
     async def send_code(self, phone: str) -> str:
+        # If there's a stale pending login for this phone, kill it first
+        prev = self._pending.pop(phone, None)
+        if prev:
+            try: await prev['client'].disconnect()
+            except Exception: pass
         cli = TelegramClient(self._session_path(phone), settings.TG_API_ID, settings.TG_API_HASH)
-        await cli.connect()
-        sent = await cli.send_code_request(phone)
-        await cli.disconnect()
+        await asyncio.wait_for(cli.connect(), timeout=20)
+        sent = await asyncio.wait_for(cli.send_code_request(phone), timeout=30)
+        self._pending[phone] = {
+            'client': cli,
+            'phone_code_hash': sent.phone_code_hash,
+            'needs_2fa': False,
+        }
         return sent.phone_code_hash
 
-    async def sign_in(self, phone: str, code: str, phone_code_hash: str, password: Optional[str] = None) -> TgUser:
-        cli = TelegramClient(self._session_path(phone), settings.TG_API_ID, settings.TG_API_HASH)
-        await cli.connect()
+    async def submit_code(self, phone: str, code: str) -> tuple[TgUser | None, bool]:
+        """Returns (user, needs_2fa). If needs_2fa=True, user is None and the
+        client is kept alive for a follow-up submit_2fa call."""
+        from telethon.errors import SessionPasswordNeededError
+        pend = self._pending.get(phone)
+        if not pend:
+            raise RuntimeError("No pending login. Send code first.")
+        cli: TelegramClient = pend['client']
         try:
-            await cli.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
-        except Exception as e:
-            from telethon.errors import SessionPasswordNeededError
-            if isinstance(e, SessionPasswordNeededError):
-                if not password:
-                    await cli.disconnect()
-                    raise
-                await cli.sign_in(password=password)
-            else:
-                await cli.disconnect()
-                raise
+            await asyncio.wait_for(
+                cli.sign_in(phone=phone, code=code, phone_code_hash=pend['phone_code_hash']),
+                timeout=30,
+            )
+        except SessionPasswordNeededError:
+            pend['needs_2fa'] = True
+            return None, True
+        except Exception:
+            # On hard error, give up the pending session so user can re-send code
+            await self._kill_pending(phone)
+            raise
         me = await cli.get_me()
-        await cli.disconnect()
+        # Code accepted, no 2FA. Disconnect this temp client now that session is saved.
+        await self._kill_pending(phone, disconnect=True)
+        return me, False
+
+    async def submit_2fa(self, phone: str, password: str) -> TgUser:
+        pend = self._pending.get(phone)
+        if not pend:
+            raise RuntimeError("No pending 2FA session. Send code first.")
+        cli: TelegramClient = pend['client']
+        try:
+            await asyncio.wait_for(cli.sign_in(password=password), timeout=30)
+        except Exception:
+            # wrong password OR network: keep pending so user can retry
+            raise
+        me = await cli.get_me()
+        await self._kill_pending(phone, disconnect=True)
         return me
+
+    async def cancel_pending(self, phone: str):
+        await self._kill_pending(phone)
+
+    async def _kill_pending(self, phone: str, disconnect: bool = True):
+        pend = self._pending.pop(phone, None)
+        if pend and disconnect:
+            try: await pend['client'].disconnect()
+            except Exception: pass
 
     # ---------- listener ----------
     def _attach_listener(self, account_id: int, cli: TelegramClient):
