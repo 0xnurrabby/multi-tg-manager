@@ -38,6 +38,11 @@ export default function SettingsTab() {
     <div className="max-w-2xl space-y-4">
       <div className="nb-card p-5">
         <h3 className="font-extrabold uppercase mb-4">Rate Limit Window</h3>
+        <p className="text-xs opacity-70 mb-3">
+          Delay between each account in every bulk task (join, leave, send, react, view). Tasks run
+          one account at a time and wait a random amount in this window before the next. Lower =
+          faster, but too low can get accounts flagged. Default 1–2s.
+        </p>
         <div className="grid grid-cols-2 gap-3">
           <label>
             <div className="text-xs font-bold uppercase mb-1">Min seconds between actions</div>
@@ -50,6 +55,16 @@ export default function SettingsTab() {
               onChange={(e) => setS({ ...s, rate_max: Number(e.target.value) || 0 })} />
           </label>
         </div>
+        <label className="block mt-3">
+          <div className="text-xs font-bold uppercase mb-1">Parallel accounts (batch size)</div>
+          <input type="number" step="1" min="1" max="50" className="nb-input"
+            value={s.concurrency ?? 5}
+            onChange={(e) => setS({ ...s, concurrency: Math.max(1, parseInt(e.target.value) || 1) })} />
+          <p className="text-xs opacity-70 mt-1">
+            How many accounts a bulk task runs at once. Higher = faster. Telegram limits are
+            per-account, so running different accounts in parallel is safe. Default 5.
+          </p>
+        </label>
       </div>
 
       <div className="nb-card p-5">

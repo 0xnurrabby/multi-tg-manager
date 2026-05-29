@@ -36,6 +36,25 @@ class SecurityMessage(Base):
     account: Mapped["Account"] = relationship(back_populates="messages")
 
 
+class GoneAccount(Base):
+    """Tombstone for an account that left the active list — either banned by
+    Telegram or manually removed. `account_id` is a plain int (NOT a FK) so the
+    record survives the hard delete of the Account row. `old_serial` is the
+    1-based position the account held among active (non-banned) accounts at the
+    moment it left."""
+    __tablename__ = "gone_accounts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tg_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    phone: Mapped[str] = mapped_column(String(32), index=True)
+    first_name: Mapped[str] = mapped_column(String(64), default="")
+    last_name: Mapped[str] = mapped_column(String(64), default="")
+    username: Mapped[str] = mapped_column(String(64), default="")
+    old_serial: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str] = mapped_column(String(16), default="removed")  # banned/removed
+    gone_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)

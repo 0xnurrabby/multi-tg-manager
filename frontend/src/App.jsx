@@ -30,6 +30,7 @@ export default function App() {
   const { theme, toggle } = useTheme()
   const [authState, setAuthState] = useState('checking') // checking | in | out
   const [accounts, setAccounts] = useState([])
+  const [gone, setGone] = useState([])  // banned/removed account history
   const [stats, setStats] = useState({ total: 0, connected: 0, banned: 0, with_2fa: 0, unread_security: 0 })
   const [selectedId, setSelectedId] = useState(null)
   const [tab, setTab] = useState('dashboard')
@@ -47,13 +48,13 @@ export default function App() {
   // global 401 handler: kick back to login
   useEffect(() => onUnauthorized(() => {
     setAuthState('out')
-    setAccounts([]); setSelectedId(null)
+    setAccounts([]); setGone([]); setSelectedId(null)
   }), [])
 
   async function logout() {
     try { await Endpoints.logout() } catch {}
     setAuthState('out')
-    setAccounts([]); setSelectedId(null)
+    setAccounts([]); setGone([]); setSelectedId(null)
     prevUnreadRef.current = 0
   }
 
@@ -69,6 +70,10 @@ export default function App() {
       }
     }
   }, [selectedId, toast, accounts.length])
+
+  const refreshGone = useCallback(async () => {
+    try { setGone(await Endpoints.goneAccounts()) } catch (e) { /* silent */ }
+  }, [])
 
   const refreshStats = useCallback(async () => {
     try {
@@ -86,9 +91,10 @@ export default function App() {
     ensureNotificationPermission()
     refreshAccounts()
     refreshStats()
-    const id = setInterval(() => { refreshAccounts(); refreshStats() }, 30000)
+    refreshGone()
+    const id = setInterval(() => { refreshAccounts(); refreshStats(); refreshGone() }, 30000)
     return () => clearInterval(id)
-  }, [authState, refreshAccounts, refreshStats])
+  }, [authState, refreshAccounts, refreshStats, refreshGone])
 
   if (authState === 'checking') {
     return (
@@ -124,10 +130,12 @@ export default function App() {
         {sidebarOpen && (
           <Sidebar
             accounts={accounts}
+            gone={gone}
             selectedId={selectedId}
             onSelect={setSelectedId}
             onAdd={() => setAddOpen(true)}
-            onDeleted={refreshAccounts}
+            onDeleted={() => { refreshAccounts(); refreshGone() }}
+            onGoneChange={refreshGone}
           />
         )}
 
@@ -144,7 +152,7 @@ export default function App() {
             ))}
           </nav>
           <div className="flex-1 min-h-0 overflow-auto p-4">
-            {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={(id) => { setSelectedId(id); setTab('profile') }} />}
+            {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={(id) => { setSelectedId(id); setTab('profile') }} onChange={() => { refreshStats(); refreshAccounts() }} />}
             {tab === 'profile'   && <ProfileTab account={selected} onRefresh={refreshAccounts} />}
             {tab === 'security'  && <SecurityTab accounts={accounts} onChange={refreshStats} />}
             {tab === 'groups'    && <GroupsTab accounts={accounts} selected={selected} />}

@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { fmtTime } from '../lib/util'
+import ProgressModal from '../components/ProgressModal.jsx'
+import { useBulkProgress } from '../lib/useBulkProgress'
 
 const TYPE_COLORS = {
   login_code:       'bg-brand-warn',
@@ -140,6 +142,152 @@ function AccountRow({ account, onChange }) {
   )
 }
 
+// Bulk change/set the Two-Step (2FA) password across many accounts at once.
+function Bulk2faPanel({ accounts, onChange }) {
+  const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
+  const [open, setOpen] = useState(false)
+  const [ids, setIds] = useState([])
+  const [newPwd, setNewPwd] = useState('')
+  const [newPwd2, setNewPwd2] = useState('')
+  const [hint, setHint] = useState('')
+  const [bank, setBank] = useState([])        // current-password attempt bank (max 5)
+  const [bankInput, setBankInput] = useState('')
+  const [showPwd, setShowPwd] = useState(false)
+  const [knownCount, setKnownCount] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    Endpoints.twofaKnown().then((r) => setKnownCount(r?.count ?? 0)).catch(() => setKnownCount(null))
+  }, [open])
+
+  const allChecked = ids.length === accounts.length && accounts.length > 0
+  const toggleAll = () => setIds(allChecked ? [] : accounts.map((a) => a.id))
+  const toggle = (id) => setIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
+
+  function addBank() {
+    const p = bankInput.trim()
+    if (!p) return
+    if (bank.length >= 5) { toast.error('Max 5 current passwords'); return }
+    if (bank.includes(p)) { toast.info('Password already added'); setBankInput(''); return }
+    setBank((arr) => [...arr, p]); setBankInput('')
+  }
+  const removeBank = (p) => setBank((arr) => arr.filter((x) => x !== p))
+
+  async function start() {
+    if (ids.length === 0) { toast.error('Pick at least one account'); return }
+    if (!newPwd) { toast.error('Enter the new 2FA password'); return }
+    if (newPwd.trim() !== newPwd2.trim()) { toast.error('New passwords do not match'); return }
+    if (!confirm(
+      `Set/change the Two-Step password on ${ids.length} account(s)?\n\n` +
+      `For accounts that already have 2FA, your remembered passwords` +
+      `${bank.length ? ` and ${bank.length} entered password(s)` : ''} are tried (up to 5 per account).`
+    )) return
+    setBusy(true)
+    await run(`Bulk 2FA — ${ids.length} account(s)`, (onEvent) =>
+      Endpoints.bulk2fa({ account_ids: ids, new_password: newPwd, hint, password_bank: bank }, onEvent))
+    setBusy(false)
+    onChange?.()  // refresh 2FA counts
+  }
+
+  return (
+    <div className="nb-card p-4 mb-4">
+      <div className="flex items-center gap-2 cursor-pointer" onClick={() => setOpen((o) => !o)}>
+        <span className="font-extrabold uppercase">Bulk Two-Step (2FA) Password</span>
+        <span className="nb-badge bg-brand-violet text-black">change / set on many</span>
+        <span className="opacity-60 text-sm ml-auto">{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div className="text-xs opacity-70">
+            Sets a new Two-Step password on every selected account. Accounts <b>without</b> 2FA get it
+            turned on. Accounts that <b>already have</b> 2FA need their current password — we try each
+            account's remembered password first (saved when you logged in), then the list below, at most
+            5 tries per account.
+            {knownCount != null && <> We currently remember <b>{knownCount}</b> password{knownCount === 1 ? '' : 's'} from login.</>}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label>
+              <div className="text-xs font-bold uppercase mb-1">New 2FA password</div>
+              <input type={showPwd ? 'text' : 'password'} className="nb-input" value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)} placeholder="new password for all" />
+            </label>
+            <label>
+              <div className="text-xs font-bold uppercase mb-1">Confirm new password</div>
+              <input type={showPwd ? 'text' : 'password'} className="nb-input" value={newPwd2}
+                onChange={(e) => setNewPwd2(e.target.value)} placeholder="repeat new password" />
+            </label>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-xs">
+              <input type="checkbox" checked={showPwd} onChange={(e) => setShowPwd(e.target.checked)} />
+              Show passwords
+            </label>
+            <label className="flex items-center gap-2 text-xs flex-1 min-w-[180px]">
+              <span className="font-bold uppercase">Hint (optional)</span>
+              <input className="nb-input !py-1" maxLength={20} value={hint}
+                onChange={(e) => setHint(e.target.value)} placeholder="max 20 chars" />
+            </label>
+          </div>
+
+          {/* current-password attempt bank */}
+          <div className="nb-card-sm p-3">
+            <div className="text-xs font-bold uppercase mb-1">Current passwords to try (max 5)</div>
+            <div className="text-[11px] opacity-60 mb-2">
+              For accounts that already have 2FA with a password we don't remember. Tried in order until one works.
+            </div>
+            <div className="flex gap-2 mb-2">
+              <input type={showPwd ? 'text' : 'password'} className="nb-input !py-1 text-sm" value={bankInput}
+                onChange={(e) => setBankInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addBank() } }}
+                placeholder="add a current password" disabled={bank.length >= 5} />
+              <button className="nb-btn !px-3" onClick={addBank} disabled={bank.length >= 5}>Add</button>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {bank.length === 0 && <span className="text-[11px] opacity-50">No passwords added yet.</span>}
+              {bank.map((p, i) => (
+                <span key={i} className="nb-badge bg-white text-black flex items-center gap-1">
+                  <span className="font-mono text-[11px] normal-case">{showPwd ? p : '•'.repeat(Math.min(p.length, 8))}</span>
+                  <button className="opacity-60 hover:opacity-100" onClick={() => removeBank(p)}>✕</button>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* account picker */}
+          <div className="nb-card-sm p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold uppercase">Accounts</span>
+              <button className="nb-btn !py-0.5 !px-2 text-[11px]" onClick={toggleAll}>{allChecked ? 'Clear' : 'Select all'}</button>
+              <span className="text-xs opacity-70 ml-auto">{ids.length} selected</span>
+            </div>
+            <div className="flex flex-wrap gap-1 max-h-40 overflow-auto">
+              {accounts.map((a) => (
+                <label key={a.id} className={'nb-badge cursor-pointer flex items-center gap-1 ' + (ids.includes(a.id) ? 'bg-brand-pri text-black' : 'bg-white text-black')}>
+                  <input type="checkbox" checked={ids.includes(a.id)} onChange={() => toggle(a.id)} />
+                  <span>{((a.first_name || '') + ' ' + (a.last_name || '')).trim() || a.phone}</span>
+                  {a.has_2fa
+                    ? <span className="text-[8px] font-bold text-brand-violet" title="already has 2FA">2FA</span>
+                    : <span className="text-[8px] font-bold opacity-40" title="no 2FA yet">off</span>}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <button className="nb-btn-pri w-full" disabled={busy} onClick={start}>
+            {busy ? 'Working…' : `Change / Set 2FA on ${ids.length} account(s)`}
+          </button>
+        </div>
+      )}
+
+      <ProgressModal progress={progress} onClose={close} />
+    </div>
+  )
+}
+
 export default function SecurityTab({ accounts, onChange }) {
   return (
     <div>
@@ -149,6 +297,7 @@ export default function SecurityTab({ accounts, onChange }) {
           All messages from the official Telegram service account (shown in your phone as <b>"Telegram"</b> / <b>+42777</b>, internal user_id <b>777000</b>) — per account. New messages also trigger a desktop notification. Use "Pull latest 50" to backfill history for a newly added account.
         </div>
       </div>
+      <Bulk2faPanel accounts={accounts} onChange={onChange} />
       {accounts.length === 0 && <div className="opacity-60">No accounts.</div>}
       {accounts.map((a) => <AccountRow key={a.id} account={a} onChange={onChange} />)}
     </div>

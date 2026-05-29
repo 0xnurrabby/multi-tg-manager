@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import secrets
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -12,6 +14,7 @@ from telethon.errors import (
     AuthKeyUnregisteredError,
     UserDeactivatedBanError,
     UserDeactivatedError,
+    SessionPasswordNeededError,
     RPCError,
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
@@ -21,11 +24,38 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import AsyncSessionLocal
-from .models import Account, SecurityMessage
+from .models import Account, SecurityMessage, GoneAccount
+from . import secrets_store
 
 log = logging.getLogger("tg_manager")
 
 SERVICE_ID = 777000
+
+
+async def record_gone_account(db, acc: Account, reason: str):
+    """Insert a GoneAccount tombstone for an account that is leaving the active
+    list. Captures a snapshot plus `old_serial` = the account's 1-based rank
+    among active (non-banned) accounts ordered by id, computed BEFORE the
+    departure is committed. Does NOT commit — the caller owns the transaction."""
+    res = await db.execute(
+        select(Account.id).where(Account.status != "banned").order_by(Account.id)
+    )
+    ids = [row[0] for row in res.all()]
+    try:
+        serial = ids.index(acc.id) + 1
+    except ValueError:
+        serial = len(ids) + 1
+    db.add(GoneAccount(
+        account_id=acc.id,
+        tg_user_id=acc.tg_user_id,
+        phone=acc.phone,
+        first_name=acc.first_name or "",
+        last_name=acc.last_name or "",
+        username=acc.username or "",
+        old_serial=serial,
+        reason=reason,
+        gone_at=datetime.utcnow(),
+    ))
 
 
 def classify_777000(text: str) -> str:
@@ -45,12 +75,25 @@ class TgClientManager:
     def __init__(self):
         self._clients: dict[int, TelegramClient] = {}  # account_id -> client
         self._pending: dict[str, dict] = {}  # phone -> {'client', 'phone_code_hash', 'needs_2fa'}
-        self._lock = asyncio.Lock()
+        self._qr_pending: dict[str, dict] = {}  # qr_id -> {'client', 'qr_login', 'wait_task', 'needs_2fa', 'session_path'}
+        # Per-account locks so two calls can't start/stop the SAME account at
+        # once, while DIFFERENT accounts still connect concurrently (a single
+        # global lock would serialize all 100+ accounts on boot).
+        self._locks: dict[int, asyncio.Lock] = {}
+        self._locks_guard = asyncio.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._new_msg_callbacks: list = []
 
     def set_loop(self, loop):
         self._loop = loop
+
+    async def _acc_lock(self, account_id: int) -> asyncio.Lock:
+        async with self._locks_guard:
+            lk = self._locks.get(account_id)
+            if lk is None:
+                lk = asyncio.Lock()
+                self._locks[account_id] = lk
+            return lk
 
     # ---------- helpers ----------
     def _session_path(self, phone: str) -> str:
@@ -69,11 +112,17 @@ class TgClientManager:
         async with AsyncSessionLocal() as db:
             res = await db.execute(select(Account))
             accounts = res.scalars().all()
-        for acc in accounts:
-            try:
-                await self.start_client(acc)
-            except Exception as e:
-                log.warning("Failed to start client for %s: %s", acc.phone, e)
+        conc = max(1, getattr(settings, "STARTUP_CONCURRENCY", 10))
+        sem = asyncio.Semaphore(conc)
+
+        async def _start_one(acc: Account):
+            async with sem:
+                try:
+                    await self.start_client(acc)
+                except Exception as e:
+                    log.warning("Failed to start client for %s: %s", acc.phone, e)
+
+        await asyncio.gather(*(_start_one(acc) for acc in accounts))
 
     async def shutdown(self):
         for cli in list(self._clients.values()):
@@ -84,11 +133,19 @@ class TgClientManager:
         for pend in list(self._pending.values()):
             try: await pend['client'].disconnect()
             except Exception: pass
+        for qr in list(self._qr_pending.values()):
+            t = qr.get('wait_task')
+            if t and not t.done():
+                t.cancel()
+            try: await qr['client'].disconnect()
+            except Exception: pass
         self._clients.clear()
         self._pending.clear()
+        self._qr_pending.clear()
 
     async def start_client(self, acc: Account) -> TelegramClient:
-        async with self._lock:
+        lock = await self._acc_lock(acc.id)
+        async with lock:
             if acc.id in self._clients:
                 return self._clients[acc.id]
             cli = TelegramClient(self._session_path(acc.phone), settings.TG_API_ID, settings.TG_API_HASH)
@@ -114,7 +171,8 @@ class TgClientManager:
             return cli
 
     async def stop_client(self, account_id: int):
-        async with self._lock:
+        lock = await self._acc_lock(account_id)
+        async with lock:
             cli = self._clients.pop(account_id, None)
         if cli:
             try:
@@ -194,6 +252,11 @@ class TgClientManager:
             # wrong password OR network: keep pending so user can retry
             raise
         me = await cli.get_me()
+        # Remember this 2FA password locally so bulk ops can reuse it.
+        try:
+            await secrets_store.save_2fa(phone, password)
+        except Exception:
+            pass
         await self._kill_pending(phone, disconnect=True)
         return me
 
@@ -205,6 +268,182 @@ class TgClientManager:
         if pend and disconnect:
             try: await pend['client'].disconnect()
             except Exception: pass
+
+    # ---------- QR login flow ----------
+    # Telethon's `qr_login()` returns a QRLogin object. Its `url` field is a
+    # tg://login?token=... string that the official Telegram mobile app scans
+    # in Settings -> Devices -> Link Desktop Device. We expose this URL to the
+    # frontend, which renders it as a QR image. We poll qr.wait() in a task
+    # and mark the pending entry done/failed/needs_2fa accordingly.
+
+    def _qr_session_path(self, qr_id: str) -> str:
+        return str(settings.sessions_path / f"qr_{qr_id}")
+
+    async def qr_start(self) -> dict:
+        """Begin a new QR login. Returns {qr_id, url, expires_at}."""
+        qr_id = secrets.token_urlsafe(12)
+        sess_path = self._qr_session_path(qr_id)
+        cli = TelegramClient(sess_path, settings.TG_API_ID, settings.TG_API_HASH)
+        await asyncio.wait_for(cli.connect(), timeout=20)
+        try:
+            qr_login = await asyncio.wait_for(cli.qr_login(), timeout=30)
+        except Exception:
+            try: await cli.disconnect()
+            except Exception: pass
+            self._safe_unlink(sess_path + ".session")
+            raise
+        wait_task = asyncio.create_task(self._qr_wait(qr_id))
+        self._qr_pending[qr_id] = {
+            'client': cli,
+            'qr_login': qr_login,
+            'wait_task': wait_task,
+            'needs_2fa': False,
+            'authorized': False,
+            'error': None,
+            'me': None,
+            'session_path': sess_path,
+        }
+        return {
+            'qr_id': qr_id,
+            'url': qr_login.url,
+            'expires_at': qr_login.expires.isoformat() if qr_login.expires else None,
+        }
+
+    async def _qr_wait(self, qr_id: str):
+        """Background task that waits for QR scan -> auth completion."""
+        entry = self._qr_pending.get(qr_id)
+        if not entry:
+            return
+        cli: TelegramClient = entry['client']
+        qr = entry['qr_login']
+        try:
+            await qr.wait()
+            # success: client is authorized
+            entry['authorized'] = True
+            try:
+                me = await cli.get_me()
+                entry['me'] = me
+            except Exception as e:
+                entry['error'] = f"get_me failed: {e}"
+        except SessionPasswordNeededError:
+            entry['needs_2fa'] = True
+        except asyncio.TimeoutError:
+            entry['error'] = "QR code expired"
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            entry['error'] = str(e)
+
+    async def qr_recreate(self, qr_id: str) -> dict:
+        """Refresh the QR token within an existing pending entry (same client)."""
+        entry = self._qr_pending.get(qr_id)
+        if not entry:
+            raise RuntimeError("QR session not found")
+        cli: TelegramClient = entry['client']
+        # cancel the old wait task before issuing a new qr_login
+        old = entry.get('wait_task')
+        if old and not old.done():
+            old.cancel()
+            try: await old
+            except Exception: pass
+        qr_login = await asyncio.wait_for(cli.qr_login(), timeout=30)
+        entry['qr_login'] = qr_login
+        entry['error'] = None
+        entry['wait_task'] = asyncio.create_task(self._qr_wait(qr_id))
+        return {
+            'qr_id': qr_id,
+            'url': qr_login.url,
+            'expires_at': qr_login.expires.isoformat() if qr_login.expires else None,
+        }
+
+    async def qr_status(self, qr_id: str) -> dict:
+        entry = self._qr_pending.get(qr_id)
+        if not entry:
+            return {'state': 'missing'}
+        if entry['authorized']:
+            return {'state': 'authorized'}
+        if entry['needs_2fa']:
+            return {'state': 'needs_2fa'}
+        if entry['error'] == 'QR code expired':
+            return {'state': 'expired'}
+        if entry['error']:
+            return {'state': 'error', 'error': entry['error']}
+        return {'state': 'waiting'}
+
+    async def qr_finalize(self, qr_id: str):
+        """After authorized, return (me, session_path) so the caller can persist
+        the account and rename the session file to phone-keyed naming."""
+        entry = self._qr_pending.get(qr_id)
+        if not entry or not entry['authorized']:
+            raise RuntimeError("QR not authorized")
+        return entry['me'], entry['client'], entry['session_path']
+
+    async def qr_submit_2fa(self, qr_id: str, password: str):
+        entry = self._qr_pending.get(qr_id)
+        if not entry:
+            raise RuntimeError("QR session not found")
+        if not entry['needs_2fa']:
+            raise RuntimeError("QR session does not require 2FA")
+        cli: TelegramClient = entry['client']
+        await asyncio.wait_for(cli.sign_in(password=password), timeout=30)
+        me = await cli.get_me()
+        entry['authorized'] = True
+        entry['me'] = me
+        # Remember this 2FA password locally (keyed by the account's phone).
+        try:
+            if getattr(me, "phone", None):
+                await secrets_store.save_2fa(me.phone, password)
+        except Exception:
+            pass
+        return me
+
+    async def qr_promote_to_phone(self, qr_id: str, phone: str):
+        """Move the QR-temp session file to the canonical acc_<phone>.session
+        path and disconnect the temp client. Returns the new path."""
+        entry = self._qr_pending.pop(qr_id, None)
+        if not entry:
+            raise RuntimeError("QR session not found")
+        wait_task = entry.get('wait_task')
+        if wait_task and not wait_task.done():
+            wait_task.cancel()
+            try: await wait_task
+            except Exception: pass
+        try: await entry['client'].disconnect()
+        except Exception: pass
+        src = entry['session_path'] + ".session"
+        dst = self._session_path(phone) + ".session"
+        try:
+            if Path(dst).exists():
+                # Existing canonical session takes precedence — drop the temp one
+                self._safe_unlink(src)
+            elif Path(src).exists():
+                shutil.move(src, dst)
+        except Exception as e:
+            log.warning("qr session move failed: %s", e)
+        return dst
+
+    async def qr_cancel(self, qr_id: str):
+        entry = self._qr_pending.pop(qr_id, None)
+        if not entry:
+            return
+        wait_task = entry.get('wait_task')
+        if wait_task and not wait_task.done():
+            wait_task.cancel()
+            try: await wait_task
+            except Exception: pass
+        try: await entry['client'].disconnect()
+        except Exception: pass
+        # Only remove the temp session file if not yet promoted
+        self._safe_unlink(entry['session_path'] + ".session")
+
+    @staticmethod
+    def _safe_unlink(path: str):
+        try:
+            p = Path(path)
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
 
     # ---------- listener ----------
     def _attach_listener(self, account_id: int, cli: TelegramClient):
@@ -257,6 +496,18 @@ class TgClientManager:
             if acc:
                 acc.status = status
                 await db.commit()
+
+    async def _mark_banned(self, account_id: int):
+        """Transition an account to 'banned' and, on the FIRST such transition,
+        log a GoneAccount tombstone. Guarded on the previous status so the 30s
+        status loop doesn't re-log a banned account every cycle."""
+        async with AsyncSessionLocal() as db:
+            acc = await db.get(Account, account_id)
+            if not acc or acc.status == "banned":
+                return
+            await record_gone_account(db, acc, "banned")
+            acc.status = "banned"
+            await db.commit()
 
     async def _sync_profile(self, account_id: int, me: TgUser):
         async with AsyncSessionLocal() as db:
@@ -319,8 +570,14 @@ class TgClientManager:
                     await cli.connect()
                 ok = await cli.is_user_authorized()
                 await self._set_status(aid, "connected" if ok else "disconnected")
-            except (AuthKeyUnregisteredError, UserDeactivatedBanError, UserDeactivatedError):
-                await self._set_status(aid, "banned")
+            except (UserDeactivatedBanError, UserDeactivatedError):
+                # Real, permanent ban/deactivation — drop into Gone/Banned history
+                # and stop polling the dead client so we don't re-hit this every 30s.
+                await self._mark_banned(aid)
+                await self.stop_client(aid)
+            except AuthKeyUnregisteredError:
+                # Session expired/revoked — recoverable by reconnecting, NOT a ban.
+                await self._set_status(aid, "disconnected")
             except Exception:
                 await self._set_status(aid, "disconnected")
 

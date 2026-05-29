@@ -74,6 +74,15 @@ app.include_router(settings_router.router, dependencies=PROTECTED_DEPS)
 app.include_router(bulk.router,            dependencies=PROTECTED_DEPS)
 
 
+# Any /api/* path that didn't match a real route above returns a clean JSON 404
+# for ANY method. Registered before the GET-only SPA fallback so an unmatched
+# POST/PUT/DELETE (e.g. calling a new endpoint against a stale server) surfaces a
+# proper "Not Found" instead of a confusing "405 Method Not Allowed".
+@app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def api_not_found(rest: str):
+    return JSONResponse({"detail": "Not Found"}, status_code=404)
+
+
 # ---- serve built frontend (single-port mode) ----
 # `start.bat` builds the frontend into backend/static/. If that folder exists, serve it.
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"

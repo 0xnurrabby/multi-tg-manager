@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import ResultModal from '../components/ResultModal.jsx'
-
-const REACTIONS = ['👍', '❤️', '🔥', '🥰', '👏', '😁', '🤔', '🤯', '🎉', '😱']
+import ProgressModal from '../components/ProgressModal.jsx'
+import ReactionBuilderModal from '../components/ReactionBuilderModal.jsx'
+import { useBulkProgress } from '../lib/useBulkProgress'
 
 function AccountPicker({ accounts, ids, setIds }) {
   return (
@@ -29,23 +29,49 @@ function AccountPicker({ accounts, ids, setIds }) {
   )
 }
 
+const keyOf = (e) => (e.custom_emoji_id ? `c:${e.custom_emoji_id}` : `s:${e.emoji}`)
+
+// Split account ids across emojis by percentage. Shuffled so it's fair.
+// Leftover accounts (when total% < 100) simply don't react. custom_emoji_id is
+// carried through so premium custom emoji reactions reach the backend.
+function distribute(ids, emojis) {
+  const shuffled = [...ids]
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+  const N = shuffled.length
+  let cursor = 0
+  const reactions = []
+  for (const e of emojis) {
+    let count = Math.min(Math.round((e.pct / 100) * N), N - cursor)
+    const slice = shuffled.slice(cursor, cursor + count)
+    cursor += count
+    if (slice.length) reactions.push({ emoji: e.emoji, custom_emoji_id: e.custom_emoji_id || null, account_ids: slice })
+  }
+  return reactions
+}
+
 export default function MessagingTab({ accounts, selected }) {
   const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
+
   const [target, setTarget] = useState('')
   const [text, setText] = useState('')
   const [bulkIds, setBulkIds] = useState([])
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState(null)
 
   // react
   const [postLink, setPostLink] = useState('')
-  const [emoji, setEmoji] = useState('🔥')
+  const [emojis, setEmojis] = useState([{ emoji: '🔥', pct: 100 }]) // [{emoji, pct}]
+  const [reactModal, setReactModal] = useState(false)
   const [reactIds, setReactIds] = useState([])
 
   // view
   const [viewLink, setViewLink] = useState('')
   const [viewIds, setViewIds] = useState([])
-  const [viewCount, setViewCount] = useState(null)
+
+  const totalPct = emojis.reduce((s, e) => s + (Number(e.pct) || 0), 0)
 
   async function sendOne() {
     if (!selected) { toast.error('Select an account first'); return }
@@ -60,29 +86,25 @@ export default function MessagingTab({ accounts, selected }) {
     if (bulkIds.length === 0 || !target || !text) { toast.error('Pick accounts, target, text'); return }
     if (!confirm(`Send from ${bulkIds.length} accounts?`)) return
     setBusy(true)
-    try {
-      const r = await Endpoints.bulkSend(bulkIds, target, text)
-      setResult({ title: 'Bulk Send Result', ...r })
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    await run(`Bulk Send (${bulkIds.length} accounts)`, (onEvent) => Endpoints.bulkSend(bulkIds, target, text, onEvent))
+    setBusy(false)
   }
 
   async function doReact() {
-    if (reactIds.length === 0 || !postLink || !emoji) { toast.error('Pick accounts, link, emoji'); return }
+    if (reactIds.length === 0 || !postLink || emojis.length === 0) { toast.error('Pick accounts, link, emoji'); return }
+    if (totalPct > 100) { toast.error('Total percentage cannot exceed 100%'); return }
+    const reactions = distribute(reactIds, emojis)
+    if (reactions.length === 0) { toast.error('Increase the percentages — no accounts got assigned'); return }
     setBusy(true)
-    try {
-      const r = await Endpoints.react(reactIds, postLink, emoji)
-      setResult({ title: 'Reactions Result', ...r })
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    await run('React to Post', (onEvent) => Endpoints.react(postLink, reactions, onEvent))
+    setBusy(false)
   }
 
   async function doView() {
     if (viewIds.length === 0 || !viewLink) { toast.error('Pick accounts and link'); return }
     setBusy(true)
-    try {
-      const r = await Endpoints.view(viewIds, viewLink)
-      setViewCount(r.views ?? null)
-      setResult({ title: 'View Result', ...r })
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    await run(`View Post (${viewIds.length} accounts)`, (onEvent) => Endpoints.view(viewIds, viewLink, onEvent))
+    setBusy(false)
   }
 
   return (
@@ -110,17 +132,36 @@ export default function MessagingTab({ accounts, selected }) {
         <h3 className="font-extrabold uppercase mb-3">React to Post</h3>
         <input className="nb-input mb-2" placeholder="https://t.me/channel/123"
           value={postLink} onChange={(e) => setPostLink(e.target.value)} />
-        <div className="flex gap-1 flex-wrap mb-2">
-          {REACTIONS.map((r) => (
-            <button key={r} onClick={() => setEmoji(r)}
-              className={'w-10 h-10 text-xl border-2 border-black dark:border-white ' + (emoji === r ? 'bg-brand-pri' : 'bg-white dark:bg-zinc-900')}>
-              {r}
+
+        {/* chosen reactions summary + open the % builder popup */}
+        <div className="nb-card-sm p-3 mb-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="font-bold text-xs uppercase">Reactions</span>
+            <button className="nb-btn !py-0.5 !px-2 text-[11px] ml-auto" onClick={() => setReactModal(true)}>
+              Set Reactions & %
             </button>
-          ))}
+          </div>
+          {emojis.length === 0 ? (
+            <div className="text-xs opacity-60">No reactions chosen yet — click “Set Reactions & %”.</div>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {emojis.map((e) => (
+                <span key={keyOf(e)} className="nb-badge bg-white text-black flex items-center gap-1">
+                  <span className="text-base leading-none">{e.emoji}</span>
+                  {e.custom_emoji_id && <span className="text-[9px] font-bold text-brand-violet" title="custom emoji">★</span>}
+                  <span className="font-mono text-[11px]">{e.pct}%</span>
+                </span>
+              ))}
+              <span className={'text-[11px] ml-auto font-bold self-center ' + (totalPct > 100 ? 'text-brand-err' : 'opacity-60')}>
+                total {totalPct}%
+              </span>
+            </div>
+          )}
         </div>
+
         <AccountPicker accounts={accounts} ids={reactIds} setIds={setReactIds} />
         <button className="nb-btn-pri mt-3 w-full" disabled={busy} onClick={doReact}>
-          Send Reactions ({reactIds.length})
+          Send Reactions ({reactIds.length} accounts)
         </button>
       </div>
 
@@ -132,10 +173,20 @@ export default function MessagingTab({ accounts, selected }) {
         <button className="nb-btn-pri mt-3" disabled={busy} onClick={doView}>
           Visit Post ({viewIds.length})
         </button>
-        {viewCount != null && <div className="mt-2 text-sm">Last view count: <b>{viewCount}</b></div>}
       </div>
 
-      {result && <ResultModal onClose={() => setResult(null)} {...result} />}
+      {reactModal && (
+        <ReactionBuilderModal
+          accountCount={reactIds.length}
+          accountId={reactIds[0] ?? selected?.id ?? accounts[0]?.id ?? null}
+          postLink={postLink}
+          initial={emojis}
+          onConfirm={(list) => { setEmojis(list); setReactModal(false) }}
+          onClose={() => setReactModal(false)}
+        />
+      )}
+
+      <ProgressModal progress={progress} onClose={close} />
     </div>
   )
 }

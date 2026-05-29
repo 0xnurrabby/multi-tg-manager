@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { CopyButton } from '../lib/CopyButton'
-import ResultModal from '../components/ResultModal.jsx'
+import ProgressModal from '../components/ProgressModal.jsx'
+import { useBulkProgress } from '../lib/useBulkProgress'
 
 export default function GroupsTab({ accounts, selected }) {
   const toast = useToast()
@@ -11,7 +12,7 @@ export default function GroupsTab({ accounts, selected }) {
   const [loading, setLoading] = useState(false)
   const [bulkIds, setBulkIds] = useState([])
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState(null)
+  const { progress, run, close } = useBulkProgress()
 
   async function loadGroups(id) {
     setLoading(true)
@@ -40,10 +41,18 @@ export default function GroupsTab({ accounts, selected }) {
     if (!target.trim() || bulkIds.length === 0) { toast.error('Pick accounts and enter a target'); return }
     if (!confirm(`Join ${target} from ${bulkIds.length} accounts?`)) return
     setBusy(true)
-    try {
-      const r = await Endpoints.bulkJoin(bulkIds, target)
-      setResult({ title: 'Bulk Join Result', ...r })
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    await run(`Bulk Join — ${target}`, (onEvent) => Endpoints.bulkJoin(bulkIds, target, onEvent))
+    setBusy(false)
+    if (selected) loadGroups(selected.id)
+  }
+
+  async function bulkLeaveTarget() {
+    if (!target.trim() || bulkIds.length === 0) { toast.error('Pick accounts and enter a target'); return }
+    if (!confirm(`Leave ${target} from the ${bulkIds.length} selected account(s) that are members?`)) return
+    setBusy(true)
+    await run(`Bulk Leave — ${target}`, (onEvent) => Endpoints.bulkLeaveTarget(bulkIds, target, onEvent))
+    setBusy(false)
+    if (selected) loadGroups(selected.id)
   }
 
   async function leaveOne(chat_id) {
@@ -61,10 +70,36 @@ export default function GroupsTab({ accounts, selected }) {
     if (bulkIds.length === 0) { toast.error('Select accounts'); return }
     if (!confirm(`Leave from ${bulkIds.length} accounts?`)) return
     setBusy(true)
-    try {
-      const r = await Endpoints.bulkLeave(bulkIds, chat_id)
-      setResult({ title: 'Bulk Leave Result', ...r })
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    await run(`Bulk Leave (${bulkIds.length} accounts)`, (onEvent) => Endpoints.bulkLeave(bulkIds, chat_id, onEvent))
+    setBusy(false)
+    if (selected) loadGroups(selected.id)
+  }
+
+  async function bulkLeaveAll() {
+    if (bulkIds.length === 0) { toast.error('Select accounts first'); return }
+    if (!confirm(
+      `Leave EVERY group/channel from ${bulkIds.length} account(s)?\n\n` +
+      `Each account will leave ALL groups & channels it is currently in.\n` +
+      `This cannot be undone (you'd have to rejoin each one manually).`
+    )) return
+    setBusy(true)
+    await run(`Leave ALL groups — ${bulkIds.length} accounts`, (onEvent) => Endpoints.bulkLeaveAll(bulkIds, onEvent))
+    setBusy(false)
+    if (selected) loadGroups(selected.id)
+  }
+
+  async function bulkDeleteAllMessages() {
+    if (bulkIds.length === 0) { toast.error('Select accounts first'); return }
+    if (!confirm(
+      `Delete ALL your messages in EVERY group from ${bulkIds.length} account(s)?\n\n` +
+      `For each account, every message it sent across ALL its groups/channels\n` +
+      `(last 2000 scanned per group) is deleted for everyone (revoke=true).\n\n` +
+      `This is PERMANENT.`
+    )) return
+    setBusy(true)
+    await run(`Delete ALL my msgs — ${bulkIds.length} accounts`, (onEvent) => Endpoints.bulkDeleteMyMessages(bulkIds, 2000, onEvent))
+    setBusy(false)
+    if (selected) loadGroups(selected.id)
   }
 
   async function deleteMyMessages(chat_id, title) {
@@ -106,6 +141,10 @@ export default function GroupsTab({ accounts, selected }) {
             />
             <button className="nb-btn-pri" disabled={busy} onClick={joinOne}>Join (1 account)</button>
             <button className="nb-btn" disabled={busy} onClick={bulkJoin}>Bulk Join ({bulkIds.length})</button>
+            <button className="nb-btn-err" disabled={busy} onClick={bulkLeaveTarget}>Bulk Leave ({bulkIds.length})</button>
+          </div>
+          <div className="text-[11px] opacity-60 mt-2">
+            Bulk Leave: selected account-er moddhe jara ei link/@username-er member, tara leave korbe.
           </div>
         </div>
 
@@ -156,7 +195,7 @@ export default function GroupsTab({ accounts, selected }) {
           <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => setBulkIds([])}>Clear</button>
           <span className="text-xs opacity-70 ml-auto">{bulkIds.length} selected</span>
         </div>
-        <div className="space-y-1 max-h-[60vh] overflow-auto">
+        <div className="space-y-1 max-h-[45vh] overflow-auto">
           {accounts.map((a) => (
             <label key={a.id} className="flex items-center gap-2 p-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800">
               <input type="checkbox" checked={bulkIds.includes(a.id)} onChange={() => toggleId(a.id)} />
@@ -164,9 +203,24 @@ export default function GroupsTab({ accounts, selected }) {
             </label>
           ))}
         </div>
+
+        {/* DANGER ZONE — acts on EVERY group of EVERY selected account */}
+        <div className="mt-4 pt-3 border-t-2 border-black dark:border-white">
+          <div className="text-[10px] uppercase font-extrabold tracking-tight text-brand-err mb-2">
+            Danger Zone — all groups, all selected accounts
+          </div>
+          <div className="space-y-2">
+            <button className="nb-btn-err w-full text-xs" disabled={busy || bulkIds.length === 0} onClick={bulkLeaveAll}>
+              Leave ALL groups ({bulkIds.length})
+            </button>
+            <button className="nb-btn-err w-full text-xs" disabled={busy || bulkIds.length === 0} onClick={bulkDeleteAllMessages}>
+              Delete ALL my msgs everywhere ({bulkIds.length})
+            </button>
+          </div>
+        </div>
       </div>
 
-      {result && <ResultModal onClose={() => setResult(null)} {...result} />}
+      <ProgressModal progress={progress} onClose={close} />
     </div>
   )
 }

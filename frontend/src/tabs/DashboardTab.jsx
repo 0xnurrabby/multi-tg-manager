@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { CopyButton } from '../lib/CopyButton'
-import { initials, colorForString, fmtTime } from '../lib/util'
+import { fmtTime } from '../lib/util'
 import { Endpoints } from '../lib/api'
+import AccountAvatar from '../components/AccountAvatar'
 
 function Stat({ label, value, color = 'bg-white', hint }) {
   return (
@@ -33,14 +34,28 @@ function StatusDot({ status }) {
   return <span className={'inline-block w-2 h-2 ' + c + ' border border-black dark:border-white'} title={status} />
 }
 
-export default function DashboardTab({ stats, accounts, onSelect }) {
+export default function DashboardTab({ stats, accounts, onSelect, onChange }) {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')   // all|connected|disconnected|banned|2fa|alerts
   const [recentAlerts, setRecentAlerts] = useState([])
+  const [marking, setMarking] = useState(false)
 
   useEffect(() => {
     Endpoints.securityMessages(undefined, true).then((m) => setRecentAlerts((m || []).slice(0, 10))).catch(() => {})
   }, [stats.unread_security])
+
+  async function markAllRead() {
+    setMarking(true)
+    try {
+      await Endpoints.markAllRead()
+      setRecentAlerts([])
+      onChange?.()
+    } catch (e) {
+      // surface nothing intrusive; alerts will reappear on next refresh if it failed
+    } finally {
+      setMarking(false)
+    }
+  }
 
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase()
@@ -137,10 +152,7 @@ export default function DashboardTab({ stats, accounts, onSelect }) {
                       className="border-b border-zinc-300 dark:border-zinc-700 hover:bg-brand-pri hover:text-black cursor-pointer">
                     <td className="p-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 border-2 border-black dark:border-white flex items-center justify-center font-extrabold text-xs text-black"
-                             style={{ background: colorForString(a.phone) }}>
-                          {initials(a.first_name, a.last_name)}
-                        </div>
+                        <AccountAvatar account={a} size={28} />
                         <span className="font-bold truncate max-w-[140px]">{(a.first_name + ' ' + a.last_name).trim() || '—'}</span>
                         {a.is_online && <span className="w-2 h-2 bg-brand-ok border border-black" title="online" />}
                       </div>
@@ -180,7 +192,15 @@ export default function DashboardTab({ stats, accounts, onSelect }) {
         <div className="nb-card p-4 h-fit">
           <div className="flex items-center justify-between mb-3">
             <div className="font-extrabold uppercase">Recent Alerts</div>
-            <span className="nb-badge bg-brand-err text-black">{totalAlerts}</span>
+            <div className="flex items-center gap-2">
+              {totalAlerts > 0 && (
+                <button className="nb-btn !py-0.5 !px-2 text-[10px] uppercase font-extrabold"
+                        onClick={markAllRead} disabled={marking}>
+                  {marking ? '…' : 'Mark all read'}
+                </button>
+              )}
+              <span className="nb-badge bg-brand-err text-black">{totalAlerts}</span>
+            </div>
           </div>
           {recentAlerts.length === 0 && (
             <div className="text-sm opacity-60">No unread security messages.</div>

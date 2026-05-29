@@ -12,8 +12,9 @@ from ..config import settings as env_settings
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 DEFAULTS = {
-    "rate_min": "2",
-    "rate_max": "4",
+    "rate_min": "0.7",
+    "rate_max": "1.5",
+    "concurrency": "8",
     "sessions_dir": env_settings.SESSIONS_DIR,
     "auto_reconnect": "true",
     "notification_sound": "true",
@@ -32,9 +33,14 @@ async def _read_all(db: AsyncSession) -> dict[str, str]:
 @router.get("", response_model=SettingsOut)
 async def get_settings(db: AsyncSession = Depends(get_db)):
     cur = await _read_all(db)
+    try:
+        conc = int(float(cur.get("concurrency", "5")))
+    except (TypeError, ValueError):
+        conc = 5
     return SettingsOut(
         rate_min=float(cur["rate_min"]),
         rate_max=float(cur["rate_max"]),
+        concurrency=max(1, conc),
         sessions_dir=cur["sessions_dir"],
         auto_reconnect=cur["auto_reconnect"] == "true",
         notification_sound=cur["notification_sound"] == "true",
@@ -43,9 +49,11 @@ async def get_settings(db: AsyncSession = Depends(get_db)):
 
 @router.put("", response_model=SettingsOut)
 async def update_settings(body: SettingsIn, db: AsyncSession = Depends(get_db)):
+    conc = max(1, int(body.concurrency or 5))
     payload = {
         "rate_min": str(body.rate_min),
         "rate_max": str(body.rate_max),
+        "concurrency": str(conc),
         "sessions_dir": body.sessions_dir,
         "auto_reconnect": "true" if body.auto_reconnect else "false",
         "notification_sound": "true" if body.notification_sound else "false",
@@ -58,9 +66,10 @@ async def update_settings(body: SettingsIn, db: AsyncSession = Depends(get_db)):
         else:
             db.add(AppSetting(key=k, value=v))
     await db.commit()
-    # apply rate to env_settings live
+    # apply rate + concurrency to env_settings live (no restart needed)
     env_settings.RATE_MIN = body.rate_min
     env_settings.RATE_MAX = body.rate_max
+    env_settings.CONCURRENCY = conc
     return await get_settings(db)
 
 

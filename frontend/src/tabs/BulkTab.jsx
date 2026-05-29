@@ -1,31 +1,37 @@
 import { useState, useRef, useMemo } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import ResultModal from '../components/ResultModal.jsx'
+import ProgressModal from '../components/ProgressModal.jsx'
+import { useBulkProgress } from '../lib/useBulkProgress'
 
-// Parse CSV/TXT: each line = "firstname,lastname,bio"  (commas inside bio allowed by taking the rest)
+// Parse CSV/TXT: each line = "firstname,lastname,username,bio".
+// username is col 3 (no separators inside it); bio is col 4+ (commas inside bio
+// allowed by taking the rest). Any field may be blank to skip it.
 function parseCsv(text) {
   const rows = []
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim()
     if (!line) continue
-    // Split into max 3 parts; allow tab or comma separator
+    // allow tab or comma separator
     const sep = line.includes('\t') ? '\t' : ','
     const parts = line.split(sep)
     const first = (parts[0] ?? '').trim()
     const last = (parts[1] ?? '').trim()
-    const bio = parts.slice(2).join(sep).trim()
-    rows.push({ first_name: first, last_name: last, bio })
+    const username = (parts[2] ?? '').trim().replace(/^@/, '')
+    const bio = parts.slice(3).join(sep).trim()
+    rows.push({ first_name: first, last_name: last, username, bio })
   }
   return rows
 }
 
 export default function BulkTab({ accounts, onDone }) {
   const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
   const [ids, setIds] = useState([])
   // simple mode (one value to all)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
+  const [username, setUsername] = useState('')
   const [bio, setBio] = useState('')
   const [appendNumber, setAppendNumber] = useState(false)
   const [startNumber, setStartNumber] = useState(1)
@@ -36,7 +42,6 @@ export default function BulkTab({ accounts, onDone }) {
   const [photos, setPhotos] = useState([])    // File[]
   const photoRef = useRef(null)
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState(null)
 
   const allChecked = ids.length === accounts.length && accounts.length > 0
   const toggleAll = () => setIds(allChecked ? [] : accounts.map((a) => a.id))
@@ -60,38 +65,43 @@ export default function BulkTab({ accounts, onDone }) {
   async function applyProfile() {
     if (ids.length === 0) { toast.error('Pick accounts'); return }
     const usingCsv = csvRows.length > 0
-    if (!usingCsv && !firstName && !lastName && bio === '') {
+    if (!usingCsv && !firstName && !lastName && !username && bio === '') {
       toast.error('Set at least one field, or load a CSV')
       return
     }
+    if (!usingCsv && username && !appendNumber && ids.length > 1) {
+      toast.error('Username must be unique. Enable "Append number" or use CSV for multiple accounts.')
+      return
+    }
     if (!confirm(`Apply profile changes to ${ids.length} accounts?` + (usingCsv ? ` (CSV will map first ${Math.min(ids.length, csvRows.length)} rows)` : ''))) return
-    setBusy(true)
-    try {
-      let per_account = null
-      if (usingCsv) {
-        per_account = {}
-        ids.forEach((aid, i) => {
-          const row = csvRows[i]
-          if (!row) return
-          per_account[String(aid)] = {
-            first_name: row.first_name || null,
-            last_name:  row.last_name  || null,
-            bio:        row.bio        || null,
-          }
-        })
-      }
-      const r = await Endpoints.bulkProfile({
-        account_ids: ids,
-        first_name: usingCsv ? null : (firstName || null),
-        last_name:  usingCsv ? null : (lastName || null),
-        bio:        usingCsv ? null : (bio === '' ? null : bio),
-        append_number: !usingCsv && appendNumber,
-        start_number: startNumber,
-        per_account,
+    let per_account = null
+    if (usingCsv) {
+      per_account = {}
+      ids.forEach((aid, i) => {
+        const row = csvRows[i]
+        if (!row) return
+        per_account[String(aid)] = {
+          first_name: row.first_name || null,
+          last_name:  row.last_name  || null,
+          username:   row.username   || null,
+          bio:        row.bio        || null,
+        }
       })
-      setResult({ title: 'Bulk Profile Result', ...r })
-      onDone?.()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    }
+    const payload = {
+      account_ids: ids,
+      first_name: usingCsv ? null : (firstName || null),
+      last_name:  usingCsv ? null : (lastName || null),
+      username:   usingCsv ? null : (username || null),
+      bio:        usingCsv ? null : (bio === '' ? null : bio),
+      append_number: !usingCsv && appendNumber,
+      start_number: startNumber,
+      per_account,
+    }
+    setBusy(true)
+    await run(`Bulk Profile (${ids.length} accounts)`, (onEvent) => Endpoints.bulkProfile(payload, onEvent))
+    setBusy(false)
+    onDone?.()
   }
 
   // ----- PHOTOS -----
@@ -118,11 +128,9 @@ export default function BulkTab({ accounts, onDone }) {
     const missing = ids.length > photos.length ? ` (${ids.length - photos.length} accounts skipped, no photo)` : ''
     if (!confirm(`Apply ${usable} photo(s) to ${ids.length} accounts in order?${extra}${missing}`)) return
     setBusy(true)
-    try {
-      const r = await Endpoints.bulkPhoto(ids, photos)
-      setResult({ title: 'Bulk Photo Result', ...r })
-      onDone?.()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+    await run(`Bulk Photo (${usable} of ${ids.length})`, (onEvent) => Endpoints.bulkPhoto(ids, photos, onEvent))
+    setBusy(false)
+    onDone?.()
   }
 
   return (
@@ -144,13 +152,14 @@ export default function BulkTab({ accounts, onDone }) {
               )}
             </div>
             <div className="text-[10px] opacity-60 mt-1">
-              Format: each line = <code>firstname,lastname,bio</code> (tab or comma). Row N applies to selected account N.
+              Format: each line = <code>firstname,lastname,username,bio</code> (tab or comma). Row N applies to selected account N.
+              Any field can be blank to skip it. <b>Username must be unique</b> per account (Telegram rule) — taken ones are reported per account.
               {csvRows.length > 0 && firstName === '' && lastName === '' && bio === '' ? '' : ' When CSV is loaded, the fields below are ignored.'}
             </div>
             {csvRows.length > 0 && (
               <div className="mt-2 max-h-32 overflow-auto text-xs font-mono opacity-80">
                 {csvRows.slice(0, 5).map((r, i) => (
-                  <div key={i}>{i + 1}. {r.first_name} | {r.last_name} | {r.bio.slice(0, 40)}</div>
+                  <div key={i}>{i + 1}. {r.first_name} | {r.last_name} | {r.username ? '@' + r.username : '—'} | {r.bio.slice(0, 40)}</div>
                 ))}
                 {csvRows.length > 5 && <div>... +{csvRows.length - 5} more</div>}
               </div>
@@ -167,13 +176,20 @@ export default function BulkTab({ accounts, onDone }) {
               <input className="nb-input" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="leave blank to skip" />
             </label>
             <label className="col-span-2">
+              <div className="text-xs font-bold uppercase mb-1">Username (without @)</div>
+              <input className="nb-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="leave blank to skip" />
+              <div className="text-[10px] opacity-60 mt-1">
+                Must be unique per account. Use "Append number" below to auto-generate (e.g., myuser1, myuser2), or use CSV for custom usernames.
+              </div>
+            </label>
+            <label className="col-span-2">
               <div className="text-xs font-bold uppercase mb-1">Bio (max 70)</div>
               <textarea maxLength={70} className="nb-input" value={bio} onChange={(e) => setBio(e.target.value)} placeholder="leave blank to skip" />
             </label>
           </div>
           <label className={'flex items-center gap-2 mt-3 ' + (csvRows.length > 0 ? 'opacity-50 pointer-events-none' : '')}>
             <input type="checkbox" checked={appendNumber} onChange={(e) => setAppendNumber(e.target.checked)} />
-            <span className="text-sm">Append number to first/last name (e.g. "Family 1", "Family 2")</span>
+            <span className="text-sm">Append number to first/last name{username ? ' and username' : ''} (e.g. "Family 1", "Family 2"{username ? `, "${username}1", "${username}2"` : ''})</span>
             {appendNumber && (
               <input type="number" min={1} className="nb-input !w-20 !py-1" value={startNumber}
                 onChange={(e) => setStartNumber(Number(e.target.value) || 1)} />
@@ -250,7 +266,7 @@ export default function BulkTab({ accounts, onDone }) {
         </div>
       </div>
 
-      {result && <ResultModal onClose={() => setResult(null)} {...result} />}
+      <ProgressModal progress={progress} onClose={close} />
     </div>
   )
 }

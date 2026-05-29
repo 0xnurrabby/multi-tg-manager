@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { CopyButton } from '../lib/CopyButton'
+import ChatPanel from '../components/ChatPanel'
 
 function Section({ title, children }) {
   return (
@@ -71,7 +72,8 @@ export default function ProfileTab({ account, onRefresh }) {
   }
 
   return (
-    <div className="max-w-3xl">
+    <div className="flex flex-col xl:flex-row gap-4 items-start">
+      <div className="flex-1 max-w-3xl min-w-0 w-full">
       <Section title={`${account.first_name || ''} ${account.last_name || ''}`.trim() || account.phone}>
         <div className="flex items-center gap-4 mb-3">
           {photoUrl ? (
@@ -129,6 +131,8 @@ export default function ProfileTab({ account, onRefresh }) {
           <button className="nb-btn-pri" onClick={() => saveProfileField('bio', bio)}>Save Bio</button>
         </div>
       </Section>
+      </div>
+      <ChatPanel account={account} className="w-full xl:flex-1 xl:max-w-xl min-w-0 xl:sticky xl:top-4" />
     </div>
   )
 }

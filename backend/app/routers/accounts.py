@@ -1,13 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import asyncio
 
 from ..db import get_db, AsyncSessionLocal
-from ..models import Account, SecurityMessage, PendingLogin
-from ..schemas import AccountOut, StatsOut, SendCodeIn, SignInIn
-from ..tg_manager import manager
+from ..models import Account, SecurityMessage, PendingLogin, GoneAccount
+from ..schemas import (
+    AccountOut, GoneAccountOut, StatsOut, SendCodeIn, SignInIn,
+    QrStartOut, QrPollIn, QrSubmit2faIn,
+)
+from ..tg_manager import manager, record_gone_account
 
 router = APIRouter(prefix="/api", tags=["accounts"])
 
@@ -56,9 +59,35 @@ async def delete_account(account_id: int, db: AsyncSession = Depends(get_db)):
     acc = await db.get(Account, account_id)
     if not acc:
         raise HTTPException(404, "Account not found")
+    # Tombstone the departing account so it shows in Gone/Banned history. Skip
+    # if it's already banned — that was logged at the ban transition (no dupes).
+    if acc.status != "banned":
+        await record_gone_account(db, acc, "removed")
     await manager.remove_account(account_id)
     await db.delete(acc)
     await db.commit()
+    return {"ok": True}
+
+
+@router.get("/gone_accounts", response_model=list[GoneAccountOut])
+async def list_gone_accounts(db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(GoneAccount).order_by(GoneAccount.gone_at.desc()))
+    return res.scalars().all()
+
+
+@router.delete("/gone_accounts")
+async def clear_gone_accounts(db: AsyncSession = Depends(get_db)):
+    await db.execute(delete(GoneAccount))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/gone_accounts/{gid}")
+async def delete_gone_account(gid: int, db: AsyncSession = Depends(get_db)):
+    g = await db.get(GoneAccount, gid)
+    if g:
+        await db.delete(g)
+        await db.commit()
     return {"ok": True}
 
 
@@ -161,3 +190,84 @@ async def sign_in_2fa(body: SignInIn, db: AsyncSession = Depends(get_db)):
 async def auth_cancel(body: SendCodeIn):
     await manager.cancel_pending(body.phone)
     return {"ok": True}
+
+
+# ----- QR Auth -----
+@router.post("/auth/qr/start", response_model=QrStartOut)
+async def qr_start():
+    try:
+        info = await asyncio.wait_for(manager.qr_start(), timeout=45)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram took too long. Try again.")
+    except Exception as e:
+        raise HTTPException(400, f"qr_start failed: {e}")
+    return info
+
+
+@router.post("/auth/qr/recreate", response_model=QrStartOut)
+async def qr_recreate(body: QrPollIn):
+    try:
+        info = await asyncio.wait_for(manager.qr_recreate(body.qr_id), timeout=45)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram took too long. Try again.")
+    except Exception as e:
+        raise HTTPException(400, f"qr_recreate failed: {e}")
+    return info
+
+
+@router.post("/auth/qr/poll")
+async def qr_poll(body: QrPollIn, db: AsyncSession = Depends(get_db)):
+    """Poll the QR session. Possible response shapes:
+      {"state": "waiting"}
+      {"state": "needs_2fa"}
+      {"state": "expired"}
+      {"state": "error", "error": "..."}
+      {"state": "authorized", "account": {...}}  -- account persisted
+    """
+    status = await manager.qr_status(body.qr_id)
+    if status.get('state') != 'authorized':
+        return status
+    return await _finalize_qr(body.qr_id, db)
+
+
+@router.post("/auth/qr/sign_in_2fa")
+async def qr_sign_in_2fa(body: QrSubmit2faIn, db: AsyncSession = Depends(get_db)):
+    if not body.password:
+        raise HTTPException(400, "password required")
+    try:
+        await asyncio.wait_for(
+            manager.qr_submit_2fa(body.qr_id, body.password), timeout=45
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "Telegram took too long. Try again.")
+    except Exception as e:
+        msg = str(e)
+        if "PASSWORD" in msg.upper() or "password" in msg:
+            raise HTTPException(400, "Wrong 2FA password")
+        raise HTTPException(400, f"2FA failed: {e}")
+    return await _finalize_qr(body.qr_id, db)
+
+
+@router.post("/auth/qr/cancel")
+async def qr_cancel(body: QrPollIn):
+    await manager.qr_cancel(body.qr_id)
+    return {"ok": True}
+
+
+async def _finalize_qr(qr_id: str, db: AsyncSession):
+    """Promote QR-temp session to phone-keyed session, persist account row,
+    start a long-lived client. Returns the response payload for poll/2fa."""
+    me, _temp_cli, _temp_path = await manager.qr_finalize(qr_id)
+    if not me:
+        raise HTTPException(400, "Could not read user info from Telegram")
+    phone = me.phone
+    if not phone:
+        raise HTTPException(400, "Telegram did not return a phone number for this user")
+    phone = phone if phone.startswith('+') else f"+{phone}"
+
+    # Move temp session file to canonical acc_<phone>.session, disconnect temp client
+    await manager.qr_promote_to_phone(qr_id, phone)
+
+    acc = await _persist_account(db, phone, me)
+    out = await _account_to_out(acc, db)
+    return {"state": "authorized", "account": out.model_dump(mode="json")}

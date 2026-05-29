@@ -5,6 +5,10 @@ __pycache__/
 .installed
 app.db
 app.db-journal
+app.db-wal
+app.db-shm
+twofa.json
+.claude/
 sessions/
 *.session
 *.session-journal

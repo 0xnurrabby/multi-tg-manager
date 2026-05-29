@@ -9,8 +9,10 @@ class Settings(BaseSettings):
     TG_API_HASH: str = ""
     SESSIONS_DIR: str = "./sessions"
     DB_URL: str = "sqlite+aiosqlite:///./app.db"
-    RATE_MIN: float = 2.0
-    RATE_MAX: float = 4.0
+    RATE_MIN: float = 0.7
+    RATE_MAX: float = 1.5
+    CONCURRENCY: int = 8  # how many accounts a bulk task processes in parallel
+    STARTUP_CONCURRENCY: int = 10  # how many accounts connect in parallel on boot
     ALLOWED_ORIGIN: str = "http://localhost:5173"
 
     APP_PASSWORD: str = ""

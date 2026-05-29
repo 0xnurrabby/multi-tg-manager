@@ -1,13 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from telethon.tl.functions.account import GetAuthorizationsRequest, ResetAuthorizationRequest
+from telethon.tl.functions.account import (
+    GetAuthorizationsRequest, ResetAuthorizationRequest, GetPasswordRequest,
+)
+from telethon.errors import FloodWaitError, PasswordHashInvalidError
 from datetime import datetime
 
-from ..db import get_db
+from ..db import get_db, AsyncSessionLocal
 from ..models import SecurityMessage, Account
-from ..schemas import SecurityMessageOut, TgSessionOut
+from ..schemas import SecurityMessageOut, TgSessionOut, Bulk2faIn
 from ..tg_manager import manager
+from .. import secrets_store
+from ..utils import bulk_stream
 
 router = APIRouter(prefix="/api/security", tags=["security"])
 
@@ -55,6 +61,100 @@ async def backfill(account_id: int, limit: int = 50):
     except Exception as e:
         raise HTTPException(400, str(e))
     return {"ok": True}
+
+
+@router.get("/twofa_known")
+async def twofa_known():
+    """How many saved 2FA passwords we have locally (used to seed bulk change)."""
+    try:
+        return {"count": await secrets_store.count()}
+    except Exception:
+        return {"count": 0}
+
+
+def _is_wrong_password(e: Exception) -> bool:
+    if isinstance(e, PasswordHashInvalidError):
+        return True
+    return "PASSWORD_HASH_INVALID" in str(e).upper()
+
+
+@router.post("/bulk_2fa")
+async def bulk_2fa(body: Bulk2faIn, db: AsyncSession = Depends(get_db)):
+    """Change (or set) the Two-Step password on many accounts at once.
+
+    For accounts that already have 2FA, the current password is required: we try
+    each account's remembered password first, then up to the provided bank — at
+    most 5 attempts per account — until one is accepted, then set the new one.
+    """
+    new_password = (body.new_password or "").strip()
+    if not new_password:
+        raise HTTPException(400, "New password is required")
+    hint = (body.hint or "")[:20]
+
+    res = await db.execute(select(Account).where(Account.id.in_(body.account_ids)))
+    accounts = [
+        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+        for a in res.scalars().all()
+    ]
+    phone_by_id = {a[0]: a[1] for a in accounts}
+    bank = [p.strip() for p in (body.password_bank or []) if p and p.strip()]
+
+    async def _set_has_2fa(account_id: int):
+        async with AsyncSessionLocal() as s:
+            acc = await s.get(Account, account_id)
+            if acc:
+                acc.has_2fa = True
+                await s.commit()
+
+    async def _save_warn(phone: str) -> str:
+        """Persist the new password, but never let a save failure mask the fact
+        that Telegram already accepted the change. Returns a warning suffix."""
+        try:
+            await secrets_store.save_2fa(phone, new_password)
+            return ""
+        except Exception:
+            return " — note: password changed but couldn't be saved locally"
+
+    async def _change(cli, aid):
+        phone = phone_by_id.get(aid, "")
+        pw = await cli(GetPasswordRequest())
+        # Account has no 2FA yet -> just set the new password (no current needed).
+        if not pw.has_password:
+            await cli.edit_2fa(new_password=new_password, hint=hint)
+            warn = await _save_warn(phone)
+            await _set_has_2fa(aid)
+            return "ok", "2FA set (was off)" + warn
+
+        # Build the candidate bank: remembered password first, then provided ones.
+        saved = await secrets_store.get_2fa(phone)
+        candidates: list[str] = []
+        for c in ([saved] if saved else []) + bank:
+            if c and c not in candidates:
+                candidates.append(c)
+        candidates = candidates[:5]  # max 5 tries per account
+        if not candidates:
+            raise ValueError(
+                "No current password known for this account. Either log in with it "
+                "first (so we remember its password), or add the current password to the list above."
+            )
+
+        tried = 0
+        for cand in candidates:
+            tried += 1
+            try:
+                await cli.edit_2fa(current_password=cand, new_password=new_password, hint=hint)
+                warn = await _save_warn(phone)
+                await _set_has_2fa(aid)
+                return "ok", f"changed (try {tried})" + warn
+            except FloodWaitError:
+                raise  # surfaced as a clear "wait Ns" message; don't keep hammering
+            except Exception as e:
+                if _is_wrong_password(e):
+                    continue  # try the next candidate
+                raise
+        raise ValueError(f"None of your {tried} current password(s) worked for this account")
+
+    return StreamingResponse(bulk_stream(accounts, _change), media_type="application/x-ndjson")
 
 
 @router.get("/sessions/{account_id}", response_model=list[TgSessionOut])

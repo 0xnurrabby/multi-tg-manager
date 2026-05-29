@@ -1,17 +1,42 @@
+import asyncio
+import re
+from urllib.parse import urlparse, parse_qs
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from telethon.tl.functions.messages import SendReactionRequest, GetMessagesViewsRequest
-from telethon.tl.types import ReactionEmoji
-import re
+from telethon.tl.functions.messages import (
+    SendReactionRequest, GetMessagesViewsRequest,
+    GetAvailableReactionsRequest, GetCustomEmojiDocumentsRequest,
+    StartBotRequest,
+)
+from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.types import (
+    ReactionEmoji, ReactionCustomEmoji,
+    ChatReactionsAll, ChatReactionsSome, ChatReactionsNone,
+    DocumentAttributeCustomEmoji,
+    User, Chat, Channel,
+)
 
 from ..db import get_db
 from ..models import Account
-from ..schemas import SendMessageIn, BulkMessageIn, ReactIn, ViewPostIn
+from ..schemas import (
+    SendMessageIn, BulkMessageIn, ReactIn, ViewPostIn,
+    AllowedReactionsIn, AllowedReactionsOut, AllowedCustomReaction,
+    OpenChatIn, ChatSendIn,
+)
 from ..tg_manager import manager
-from ..utils import jitter_delay, friendly_error
+from ..utils import friendly_error, bulk_stream
 
 router = APIRouter(prefix="/api/messaging", tags=["messaging"])
+
+
+def _reaction_obj(emoji: str | None, custom_emoji_id: int | None):
+    """Build a Telethon reaction object: custom emoji if an id is given, else standard."""
+    if custom_emoji_id:
+        return ReactionCustomEmoji(document_id=int(custom_emoji_id))
+    return ReactionEmoji(emoticon=emoji)
 
 
 def _parse_post_link(link: str) -> tuple[str, int]:
@@ -24,6 +49,14 @@ def _parse_post_link(link: str) -> tuple[str, int]:
         if len(parts) >= 2:
             return parts[0], int(parts[1])
     raise ValueError("Invalid post link")
+
+
+async def _accounts_named(db: AsyncSession, ids: list[int]) -> list[tuple[int, str, str]]:
+    res = await db.execute(select(Account).where(Account.id.in_(ids)))
+    return [
+        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+        for a in res.scalars().all()
+    ]
 
 
 @router.post("/{account_id}/send")
@@ -40,26 +73,14 @@ async def send_message(account_id: int, body: SendMessageIn):
 
 @router.post("/bulk_send")
 async def bulk_send(body: BulkMessageIn, db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(Account).where(Account.id.in_(body.account_ids)))
-    accounts = res.scalars().all()
-    success, failed, skipped = 0, 0, 0
-    results = []
-    for idx, acc in enumerate(accounts):
-        cli = manager.get(acc.id)
-        if not cli:
-            skipped += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "skipped"})
-            continue
-        try:
-            await cli.send_message(body.target, body.text)
-            success += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "ok"})
-        except Exception as e:
-            failed += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "failed", "detail": friendly_error(e)})
-        if idx < len(accounts) - 1:
-            await jitter_delay(3, 6)
-    return {"success": success, "failed": failed, "skipped": skipped, "results": results}
+    accounts = await _accounts_named(db, body.account_ids)
+    target, text = body.target, body.text
+
+    async def _send(cli, aid):
+        await cli.send_message(target, text)
+        return "ok", ""
+
+    return StreamingResponse(bulk_stream(accounts, _send), media_type="application/x-ndjson")
 
 
 @router.post("/react")
@@ -68,30 +89,113 @@ async def react(body: ReactIn, db: AsyncSession = Depends(get_db)):
         chan, msg_id = _parse_post_link(body.post_link)
     except Exception as e:
         raise HTTPException(400, str(e))
-    res = await db.execute(select(Account).where(Account.id.in_(body.account_ids)))
-    accounts = res.scalars().all()
-    success, failed, skipped = 0, 0, 0
-    results = []
-    for idx, acc in enumerate(accounts):
-        cli = manager.get(acc.id)
-        if not cli:
-            skipped += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "skipped"})
-            continue
+
+    # Flatten assignments into a per-account reaction map (later assignment wins
+    # on overlap). Value is (display_glyph, custom_emoji_id_or_None).
+    react_by_id: dict[int, tuple[str, int | None]] = {}
+    for a in body.reactions:
+        for aid in a.account_ids:
+            react_by_id[aid] = (a.emoji, a.custom_emoji_id)
+    if not react_by_id:
+        raise HTTPException(400, "No accounts selected for any reaction")
+
+    accounts = await _accounts_named(db, list(react_by_id.keys()))
+
+    async def _react(cli, aid):
+        emoji, custom_id = react_by_id.get(aid, (None, None))
+        entity = await cli.get_entity(chan)
+        await cli(SendReactionRequest(
+            peer=entity, msg_id=msg_id,
+            reaction=[_reaction_obj(emoji, custom_id)],
+        ))
+        return "ok", (f"{emoji} (custom)" if custom_id else emoji)
+
+    return StreamingResponse(bulk_stream(accounts, _react), media_type="application/x-ndjson")
+
+
+@router.post("/allowed_reactions", response_model=AllowedReactionsOut)
+async def allowed_reactions(body: AllowedReactionsIn, db: AsyncSession = Depends(get_db)):
+    """What reactions does this post's chat allow? Used to populate the reaction
+    picker so the user only chooses emoji that will actually work (admin-disabled
+    ones simply aren't offered)."""
+    try:
+        chan, _msg_id = _parse_post_link(body.post_link)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+    # pick a client to query through
+    cli = manager.get(body.account_id) if body.account_id else None
+    if not cli:
+        clients = await manager.all_clients()
+        cli = next(iter(clients.values()), None)
+    if not cli:
+        raise HTTPException(409, "No connected account to read reactions with")
+
+    try:
+        entity = await cli.get_entity(chan)
+        avail = None
         try:
-            entity = await cli.get_entity(chan)
-            await cli(SendReactionRequest(
-                peer=entity, msg_id=msg_id,
-                reaction=[ReactionEmoji(emoticon=body.emoji)],
-            ))
-            success += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "ok"})
-        except Exception as e:
-            failed += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "failed", "detail": friendly_error(e)})
-        if idx < len(accounts) - 1:
-            await jitter_delay(2, 4)
-    return {"success": success, "failed": failed, "skipped": skipped, "results": results}
+            full = await cli(GetFullChannelRequest(entity))
+            avail = getattr(full.full_chat, "available_reactions", None)
+        except Exception:
+            avail = None
+
+        if isinstance(avail, ChatReactionsNone):
+            return AllowedReactionsOut(mode="none")
+
+        if isinstance(avail, ChatReactionsSome):
+            standard: list[str] = []
+            custom_ids: list[int] = []
+            for r in avail.reactions:
+                if isinstance(r, ReactionEmoji):
+                    standard.append(r.emoticon)
+                elif isinstance(r, ReactionCustomEmoji):
+                    custom_ids.append(r.document_id)
+            custom = await _resolve_custom(cli, custom_ids)
+            return AllowedReactionsOut(mode="some", standard=standard, custom=custom)
+
+        # ChatReactionsAll or None -> all standard reactions allowed
+        allow_custom = bool(getattr(avail, "allow_custom", False)) if avail is not None else False
+        standard = await _global_standard_reactions(cli)
+        return AllowedReactionsOut(mode="all", allow_custom=allow_custom, standard=standard)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e))
+
+
+async def _global_standard_reactions(cli) -> list[str]:
+    try:
+        res = await cli(GetAvailableReactionsRequest(hash=0))
+        out = []
+        for r in getattr(res, "reactions", []):
+            if getattr(r, "inactive", False):
+                continue
+            emo = getattr(r, "reaction", None)
+            if emo:
+                out.append(emo)
+        return out
+    except Exception:
+        return []
+
+
+async def _resolve_custom(cli, ids: list[int]) -> list[AllowedCustomReaction]:
+    if not ids:
+        return []
+    out: list[AllowedCustomReaction] = []
+    try:
+        docs = await cli(GetCustomEmojiDocumentsRequest(document_id=ids))
+        for d in docs:
+            alt = ""
+            for attr in getattr(d, "attributes", []) or []:
+                if isinstance(attr, DocumentAttributeCustomEmoji):
+                    alt = attr.alt or ""
+                    break
+            out.append(AllowedCustomReaction(id=d.id, alt=alt))
+    except Exception:
+        # if we can't resolve alts, still return ids with a generic glyph
+        out = [AllowedCustomReaction(id=i, alt="⭐") for i in ids]
+    return out
 
 
 @router.post("/view")
@@ -100,27 +204,205 @@ async def view(body: ViewPostIn, db: AsyncSession = Depends(get_db)):
         chan, msg_id = _parse_post_link(body.post_link)
     except Exception as e:
         raise HTTPException(400, str(e))
-    res = await db.execute(select(Account).where(Account.id.in_(body.account_ids)))
-    accounts = res.scalars().all()
-    success, failed, skipped = 0, 0, 0
-    last_views = None
-    results = []
-    for idx, acc in enumerate(accounts):
-        cli = manager.get(acc.id)
-        if not cli:
-            skipped += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "skipped"})
-            continue
-        try:
-            entity = await cli.get_entity(chan)
-            r = await cli(GetMessagesViewsRequest(peer=entity, id=[msg_id], increment=True))
-            if r and r.views:
-                last_views = r.views[0].views
-            success += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "ok", "views": last_views})
-        except Exception as e:
-            failed += 1
-            results.append({"id": acc.id, "phone": acc.phone, "status": "failed", "detail": friendly_error(e)})
-        if idx < len(accounts) - 1:
-            await jitter_delay(2, 4)
-    return {"success": success, "failed": failed, "skipped": skipped, "results": results, "views": last_views}
+    accounts = await _accounts_named(db, body.account_ids)
+
+    async def _view(cli, aid):
+        entity = await cli.get_entity(chan)
+        r = await cli(GetMessagesViewsRequest(peer=entity, id=[msg_id], increment=True))
+        n = r.views[0].views if (r and r.views) else None
+        return "ok", (f"{n} views" if n is not None else "")
+
+    return StreamingResponse(bulk_stream(accounts, _view), media_type="application/x-ndjson")
+
+
+# ---------------------------------------------------------------------------
+# Telegram-like chat panel (Profile tab): open a chat by @username / t.me link,
+# read recent history, send messages, and fire bot referral /start links.
+# ---------------------------------------------------------------------------
+
+def _parse_chat_input(raw: str) -> tuple[str, str | None]:
+    """Parse what the user pasted into (peer, start_param).
+
+    Handles: '@user', bare 'user', 'https://t.me/user', 't.me/user?start=PAY',
+    'tg://resolve?domain=user&start=PAY'. Raises ValueError for invite links
+    (t.me/+hash or t.me/joinchat/HASH), which require joining first."""
+    s = (raw or "").strip()
+    if not s:
+        raise ValueError("Enter a username or link")
+
+    # tg://resolve?domain=foo&start=bar
+    if s.lower().startswith("tg://resolve"):
+        q = parse_qs(urlparse(s).query)
+        dom = (q.get("domain") or [""])[0]
+        if not dom:
+            raise ValueError("Invalid tg:// link")
+        return dom, (q.get("start") or [None])[0]
+
+    body = s
+    for pre in ("https://", "http://"):
+        if body.lower().startswith(pre):
+            body = body[len(pre):]
+            break
+
+    low = body.lower()
+    if low.startswith("t.me/") or low.startswith("telegram.me/"):
+        rest = body.split("/", 1)[1]
+        if rest.startswith("+") or rest.lower().startswith("joinchat/"):
+            raise ValueError(
+                "That's an invite link — join it from the Groups tab first, "
+                "then open it here by @username."
+            )
+        path, _, query = rest.partition("?")
+        seg = path.split("/")[0]
+        if not seg:
+            raise ValueError("Invalid t.me link")
+        start_param = (parse_qs(query).get("start") or [None])[0] if query else None
+        return seg, start_param
+
+    if s.startswith("@"):
+        return s[1:], None
+    return s, None
+
+
+def _coerce_peer(peer: str):
+    """get_entity accepts a username string or an int id. Numeric strings must
+    be cast to int or Telethon treats them as usernames."""
+    p = (peer or "").strip()
+    if re.fullmatch(r"-?\d+", p):
+        return int(p)
+    return p
+
+
+def _peer_info(entity) -> dict:
+    if isinstance(entity, User):
+        name = (f"{entity.first_name or ''} {entity.last_name or ''}").strip() \
+            or (entity.username or str(entity.id))
+        kind = "bot" if getattr(entity, "bot", False) else "user"
+    elif isinstance(entity, Channel):
+        name = entity.title or (entity.username or str(entity.id))
+        kind = "channel" if getattr(entity, "broadcast", False) else "group"
+    elif isinstance(entity, Chat):
+        name = entity.title or str(entity.id)
+        kind = "group"
+    else:
+        name = str(getattr(entity, "id", "")) or "chat"
+        kind = "unknown"
+    username = getattr(entity, "username", None)
+    return {
+        "id": entity.id,
+        "ref": username or str(entity.id),
+        "title": name,
+        "username": username,
+        "kind": kind,
+        "is_bot": bool(getattr(entity, "bot", False)),
+    }
+
+
+def _media_label(msg) -> str | None:
+    media = getattr(msg, "media", None)
+    if media is None:
+        return None
+    t = type(media).__name__
+    if "Photo" in t:
+        return "[photo]"
+    if "Document" in t:
+        doc = getattr(media, "document", None)
+        mime = getattr(doc, "mime_type", "") or ""
+        if "image" in mime:
+            return "[sticker/image]"
+        if "video" in mime:
+            return "[video]"
+        if "audio" in mime:
+            return "[audio]"
+        return "[file]"
+    if "WebPage" in t:
+        return None  # link preview — the URL is already in the text
+    if "Poll" in t:
+        return "[poll]"
+    if "Geo" in t:
+        return "[location]"
+    if "Contact" in t:
+        return "[contact]"
+    return "[media]"
+
+
+def _msg_to_dict(msg) -> dict:
+    text = getattr(msg, "message", None) or ""
+    date = getattr(msg, "date", None)
+    return {
+        "id": getattr(msg, "id", 0),
+        "out": bool(getattr(msg, "out", False)),
+        "text": text,
+        "media": _media_label(msg) if not text else None,
+        "date": date.isoformat() if date else None,
+        "service": bool(getattr(msg, "action", None)),
+        "sender_id": getattr(msg, "sender_id", None),
+    }
+
+
+async def _history(cli, entity, limit: int = 40) -> list[dict]:
+    out: list[dict] = []
+    async for m in cli.iter_messages(entity, limit=max(1, min(limit, 100))):
+        out.append(_msg_to_dict(m))
+    out.reverse()  # oldest-first for natural top-to-bottom display
+    return out
+
+
+@router.post("/{account_id}/open")
+async def open_chat(account_id: int, body: OpenChatIn):
+    """Resolve a chat by @username / t.me link, optionally fire a bot referral
+    /start, and return the peer info + recent history."""
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    try:
+        peer_ref, start_param = _parse_chat_input(body.input)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    try:
+        entity = await cli.get_entity(_coerce_peer(peer_ref))
+        started = False
+        if start_param and getattr(entity, "bot", False):
+            try:
+                await cli(StartBotRequest(bot=entity, peer=entity, start_param=start_param))
+            except Exception:
+                # Fall back to a plain "/start <payload>" — the same payload still
+                # reaches the bot (e.g. if StartBot is rejected for an already-started bot).
+                await cli.send_message(entity, f"/start {start_param}")
+            started = True
+            await asyncio.sleep(1.0)  # let the bot reply before we read history
+        peer = _peer_info(entity)
+        msgs = await _history(cli, entity, body.limit)
+        return {"peer": peer, "started": started, "start_param": start_param, "messages": msgs}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e))
+
+
+@router.get("/{account_id}/history")
+async def chat_history(account_id: int, peer: str, limit: int = 40):
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    try:
+        entity = await cli.get_entity(_coerce_peer(peer))
+        return {"messages": await _history(cli, entity, limit)}
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e))
+
+
+@router.post("/{account_id}/chat_send")
+async def chat_send(account_id: int, body: ChatSendIn):
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "Message is empty")
+    try:
+        entity = await cli.get_entity(_coerce_peer(body.peer))
+        sent = await cli.send_message(entity, text)
+        return {"ok": True, "message": _msg_to_dict(sent)}
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e))
