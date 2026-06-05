@@ -181,6 +181,9 @@ export const Endpoints = {
 
   sendMessage: (id, target, text) => api.post(`/api/messaging/${id}/send`, { target, text }),
   bulkSend: (ids, target, text, onEvent) => streamNDJSON('/api/messaging/bulk_send', { account_ids: ids, target, text }, onEvent),
+  // wipe the ENTIRE chat with one user (by @username / t.me link) from selected
+  // accounts: clears history for both sides (revoke) and removes the dialog
+  bulkWipeChat: (ids, target, onEvent) => streamNDJSON('/api/messaging/bulk_wipe_chat', { account_ids: ids, target }, onEvent),
 
   // Telegram-like chat panel: open by @username / t.me link (referral links
   // like t.me/Bot?start=CODE fire the bot /start), poll history, send.

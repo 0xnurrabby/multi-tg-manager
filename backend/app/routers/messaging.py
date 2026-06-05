@@ -12,6 +12,7 @@ from telethon.tl.functions.messages import (
     StartBotRequest,
 )
 from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.errors import FloodWaitError
 from telethon.tl.types import (
     ReactionEmoji, ReactionCustomEmoji,
     ChatReactionsAll, ChatReactionsSome, ChatReactionsNone,
@@ -24,7 +25,7 @@ from ..models import Account
 from ..schemas import (
     SendMessageIn, BulkMessageIn, ReactIn, ViewPostIn,
     AllowedReactionsIn, AllowedReactionsOut, AllowedCustomReaction,
-    OpenChatIn, ChatSendIn,
+    OpenChatIn, ChatSendIn, BulkWipeChatIn,
 )
 from ..tg_manager import manager
 from ..utils import friendly_error, bulk_stream
@@ -406,3 +407,56 @@ async def chat_send(account_id: int, body: ChatSendIn):
         return {"ok": True, "message": _msg_to_dict(sent)}
     except Exception as e:
         raise HTTPException(400, friendly_error(e))
+
+
+# ---------------------------------------------------------------------------
+# Bulk wipe a whole conversation by @username / t.me link: from every selected
+# account, delete the ENTIRE chat with that user — history is cleared for both
+# sides (revoke=True) and the dialog is removed, so the chat ceases to exist.
+# ---------------------------------------------------------------------------
+
+async def _wipe_chat_for_client(cli, target: str) -> tuple[str, str]:
+    """Resolve `target` to a peer and delete the whole conversation with it.
+
+    delete_dialog(revoke=True) issues messages.DeleteHistory(revoke=True) for a
+    user/bot peer, which removes every message for BOTH sides and drops the
+    dialog. Accounts that never had a chat with the user are reported as a soft
+    'skipped' rather than a misleading success.
+    """
+    peer_ref, _ = _parse_chat_input(target)
+    entity = await cli.get_entity(_coerce_peer(peer_ref))
+
+    # Cheap existence probe so a no-op wipe isn't reported as a real delete.
+    had: bool | None = False
+    try:
+        async for _m in cli.iter_messages(entity, limit=1):
+            had = True
+            break
+    except Exception:
+        had = None  # couldn't read — don't claim anything either way
+
+    async def _do():
+        await cli.delete_dialog(entity, revoke=True)
+
+    try:
+        await _do()
+    except FloodWaitError as fw:
+        if fw.seconds <= 30:
+            await asyncio.sleep(fw.seconds + 1)
+            await _do()
+        else:
+            raise
+
+    if had is False:
+        return "skipped", "no chat with this user — nothing to wipe"
+    return "ok", "chat wiped (deleted for both sides)"
+
+
+@router.post("/bulk_wipe_chat")
+async def bulk_wipe_chat(body: BulkWipeChatIn, db: AsyncSession = Depends(get_db)):
+    accounts = await _accounts_named(db, body.account_ids)
+    target = body.target
+    return StreamingResponse(
+        bulk_stream(accounts, lambda cli, aid: _wipe_chat_for_client(cli, target)),
+        media_type="application/x-ndjson",
+    )

@@ -182,6 +182,14 @@ class BulkMessageIn(BaseModel):
     text: str
 
 
+class BulkWipeChatIn(BaseModel):
+    """Delete the ENTIRE conversation with one user/chat (by @username or t.me
+    link) from every selected account: clears history for both sides (revoke)
+    and removes the dialog so the chat no longer exists."""
+    account_ids: list[int]
+    target: str
+
+
 class OpenChatIn(BaseModel):
     # A @username, bare username, t.me link, or tg://resolve deep link. Bot
     # referral links like t.me/Bot?start=PAYLOAD fire the bot /start so the

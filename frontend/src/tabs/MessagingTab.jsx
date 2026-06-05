@@ -71,6 +71,10 @@ export default function MessagingTab({ accounts, selected }) {
   const [viewLink, setViewLink] = useState('')
   const [viewIds, setViewIds] = useState([])
 
+  // wipe DM / chat by username (deletes the whole conversation, both sides)
+  const [wipeTarget, setWipeTarget] = useState('')
+  const [wipeIds, setWipeIds] = useState([])
+
   const totalPct = emojis.reduce((s, e) => s + (Number(e.pct) || 0), 0)
 
   async function sendOne() {
@@ -104,6 +108,20 @@ export default function MessagingTab({ accounts, selected }) {
     if (viewIds.length === 0 || !viewLink) { toast.error('Pick accounts and link'); return }
     setBusy(true)
     await run(`View Post (${viewIds.length} accounts)`, (onEvent) => Endpoints.view(viewIds, viewLink, onEvent))
+    setBusy(false)
+  }
+
+  async function doWipe() {
+    const t = wipeTarget.trim()
+    if (wipeIds.length === 0 || !t) { toast.error('Pick accounts and enter a @username'); return }
+    if (!confirm(
+      `Wipe the ENTIRE chat with "${t}" from ${wipeIds.length} account(s)?\n\n` +
+      `Every message in that conversation is deleted for BOTH sides (revoke=true)\n` +
+      `and the chat is removed completely — it will no longer exist.\n\n` +
+      `This is PERMANENT and cannot be undone.`
+    )) return
+    setBusy(true)
+    await run(`Wipe chat — ${t} (${wipeIds.length} accounts)`, (onEvent) => Endpoints.bulkWipeChat(wipeIds, t, onEvent))
     setBusy(false)
   }
 
@@ -172,6 +190,21 @@ export default function MessagingTab({ accounts, selected }) {
         <AccountPicker accounts={accounts} ids={viewIds} setIds={setViewIds} />
         <button className="nb-btn-pri mt-3" disabled={busy} onClick={doView}>
           Visit Post ({viewIds.length})
+        </button>
+      </div>
+
+      <div className="nb-card p-4 lg:col-span-2">
+        <h3 className="font-extrabold uppercase mb-1 text-brand-err">Wipe DM / Chat</h3>
+        <div className="text-[11px] opacity-70 mb-3">
+          Paste a @username (or t.me link). For every selected account, the WHOLE conversation
+          with that user is deleted for <b>both sides</b> (revoke) and the chat is removed —
+          it stops existing. Permanent, cannot be undone.
+        </div>
+        <input className="nb-input mb-2" placeholder="@username or https://t.me/username"
+          value={wipeTarget} onChange={(e) => setWipeTarget(e.target.value)} />
+        <AccountPicker accounts={accounts} ids={wipeIds} setIds={setWipeIds} />
+        <button className="nb-btn-err mt-3" disabled={busy || wipeIds.length === 0 || !wipeTarget.trim()} onClick={doWipe}>
+          Wipe Chat from {wipeIds.length} account{wipeIds.length === 1 ? '' : 's'}
         </button>
       </div>
 
