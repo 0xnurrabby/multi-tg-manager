@@ -114,9 +114,15 @@ class SecurityMessageOut(BaseModel):
     type: str
     is_read: bool
     received_at: datetime
+    buttons: list[dict] = Field(default_factory=list)
+    action_status: Optional[str] = ""
 
     class Config:
         from_attributes = True
+
+
+class PressServiceButtonIn(BaseModel):
+    index: int
 
 
 class TgSessionOut(BaseModel):
@@ -264,6 +270,22 @@ class SettingsIn(BaseModel):
 
 class SettingsOut(SettingsIn):
     pass
+
+
+class AiSettingsIn(BaseModel):
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    target: Optional[str] = None
+    min_turns: Optional[int] = None
+    max_turns: Optional[int] = None
+
+
+class AiStartIn(BaseModel):
+    account_ids: list[int]
+
+
+class AiStopIn(BaseModel):
+    account_ids: Optional[list[int]] = None
 
 
 class BulkProgressEvent(BaseModel):

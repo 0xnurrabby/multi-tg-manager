@@ -22,7 +22,7 @@ export default function AccountAvatar({
   const px = `${size}px`
   return (
     <div
-      className={'relative border-2 border-black dark:border-white overflow-hidden flex items-center justify-center font-extrabold text-black ' + className}
+      className={        'relative border border-[color:var(--hairline)] overflow-hidden flex items-center justify-center font-semibold text-ink ' + className}
       style={{ width: px, height: px, background: url ? '#fff' : colorForString(account.phone) }}
     >
       {url
@@ -33,7 +33,7 @@ export default function AccountAvatar({
       {showOnline && (
         <span
           className={
-            'absolute -bottom-1 -right-1 w-3 h-3 border-2 border-black ' +
+            'absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[color:var(--surface)] ' +
             (account.is_online ? 'bg-brand-ok' : 'bg-zinc-400')
           }
         />

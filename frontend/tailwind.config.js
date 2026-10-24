@@ -5,26 +5,38 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        mono: ['JetBrains Mono', 'IBM Plex Mono', 'monospace'],
         sans: ['Inter', 'system-ui', 'sans-serif'],
-      },
-      boxShadow: {
-        nb: '4px 4px 0 0 rgba(0,0,0,1)',
-        nbsm: '2px 2px 0 0 rgba(0,0,0,1)',
-        nblg: '6px 6px 0 0 rgba(0,0,0,1)',
-        nbdark: '4px 4px 0 0 rgba(255,255,255,0.9)',
-        nbdarksm: '2px 2px 0 0 rgba(255,255,255,0.9)',
-        nbdarklg: '6px 6px 0 0 rgba(255,255,255,0.9)',
+        display: ['Bricolage Grotesque', 'Inter', 'system-ui', 'sans-serif'],
+        serif: ['Instrument Serif', 'Georgia', 'serif'],
+        mono: ['JetBrains Mono', 'IBM Plex Mono', 'monospace'],
       },
       colors: {
+        paper: 'rgb(var(--paper) / <alpha-value>)',
+        surface: 'rgb(var(--surface) / <alpha-value>)',
+        ink: 'rgb(var(--ink) / <alpha-value>)',
+        muted: 'rgb(var(--muted) / <alpha-value>)',
         brand: {
-          pri: '#FFEB3B',
-          ok: '#7BFFB5',
-          warn: '#FFD166',
-          err: '#FF5C7C',
-          info: '#7FB7FF',
-          violet: '#C4A9FF',
+          pri: 'rgb(var(--accent-sun) / <alpha-value>)',
+          ok: 'rgb(var(--accent-mint) / <alpha-value>)',
+          warn: 'rgb(var(--accent-peach) / <alpha-value>)',
+          err: 'rgb(var(--accent-rose) / <alpha-value>)',
+          info: 'rgb(var(--accent-sky) / <alpha-value>)',
+          violet: 'rgb(var(--accent-sky) / <alpha-value>)',
         },
+      },
+      borderColor: {
+        DEFAULT: 'rgb(var(--ink) / 0.12)',
+      },
+      borderRadius: {
+        card: '18px',
+        pill: '999px',
+      },
+      boxShadow: {
+        card: 'var(--shadow-card)',
+        lift: 'var(--shadow-hover)',
+      },
+      transitionTimingFunction: {
+        editorial: 'cubic-bezier(0.22, 1, 0.36, 1)',
       },
     },
   },

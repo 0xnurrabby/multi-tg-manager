@@ -3,13 +3,17 @@ import { CopyButton } from '../lib/CopyButton'
 import { fmtTime } from '../lib/util'
 import { Endpoints } from '../lib/api'
 import AccountAvatar from '../components/AccountAvatar'
+import Icon from '../components/Icon'
 
-function Stat({ label, value, color = 'bg-white', hint }) {
+function Stat({ label, value, accent, hint }) {
   return (
-    <div className={`nb-stat p-4 ${color}`}>
-      <div className="text-[10px] uppercase font-extrabold tracking-tight">{label}</div>
-      <div className="text-3xl font-extrabold mt-1 font-mono leading-none">{value}</div>
-      {hint && <div className="text-[10px] opacity-70 mt-1">{hint}</div>}
+    <div className="nb-card nb-card-lift p-5">
+      <div className="flex items-center gap-2">
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: `rgb(var(${accent}))` }} />
+        <span className="micro-label">{label}</span>
+      </div>
+      <div className="display-title text-[38px] mt-4 tabular-nums">{value}</div>
+      {hint && <div className="text-[12px] text-muted mt-2">{hint}</div>}
     </div>
   )
 }
@@ -21,7 +25,7 @@ function StatusBar({ stats, total }) {
   if (total === 0) return null
   const pct = (n) => `${(n / total) * 100}%`
   return (
-    <div className="flex h-4 border-2 border-black dark:border-white overflow-hidden">
+    <div className="flex h-2 rounded-full overflow-hidden bg-[rgb(var(--ink)/0.06)]">
       <div className="bg-brand-ok"   title={`${c} connected`}    style={{ width: pct(c) }} />
       <div className="bg-brand-warn" title={`${d} disconnected`} style={{ width: pct(d) }} />
       <div className="bg-brand-err"  title={`${b} banned`}       style={{ width: pct(b) }} />
@@ -31,10 +35,20 @@ function StatusBar({ stats, total }) {
 
 function StatusDot({ status }) {
   const c = status === 'connected' ? 'bg-brand-ok' : status === 'banned' ? 'bg-brand-err' : 'bg-brand-warn'
-  return <span className={'inline-block w-2 h-2 ' + c + ' border border-black dark:border-white'} title={status} />
+  return <span className={'inline-block w-2 h-2 rounded-full ' + c} title={status} />
 }
 
-export default function DashboardTab({ stats, accounts, onSelect, onChange }) {
+function LegendDot({ tone, label, count }) {
+  return (
+    <span className="flex items-center gap-2 text-[11px] text-muted">
+      <span className={'w-2 h-2 rounded-full ' + tone} />
+      {label}
+      <span className="font-mono text-ink">{count}</span>
+    </span>
+  )
+}
+
+export default function DashboardTab({ stats, accounts, onSelect, onOpenAlert, onChange }) {
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState('all')   // all|connected|disconnected|banned|2fa|alerts
   const [recentAlerts, setRecentAlerts] = useState([])
@@ -74,47 +88,79 @@ export default function DashboardTab({ stats, accounts, onSelect, onChange }) {
   const totalAlerts = stats.unread_security || 0
   const without2fa = stats.total - stats.with_2fa
   const onlineCount = accounts.filter((a) => a.is_online).length
+  const disconnected = Math.max(stats.total - stats.connected - stats.banned, 0)
 
   return (
-    <div className="space-y-4">
-      {/* TOP STATS */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-        <Stat label="Total Accounts" value={stats.total} />
-        <Stat label="Connected"      value={stats.connected} color="bg-brand-ok" />
-        <Stat label="Disconnected"   value={Math.max(stats.total - stats.connected - stats.banned, 0)} color="bg-brand-warn" />
-        <Stat label="Banned"         value={stats.banned}    color="bg-brand-err" />
-        <Stat label="2FA Enabled"    value={stats.with_2fa}  color="bg-brand-violet"
-              hint={without2fa > 0 ? `${without2fa} without 2FA` : 'all protected'} />
-        <Stat label="Unread Alerts"  value={totalAlerts}     color={totalAlerts > 0 ? 'bg-brand-err' : 'bg-white'} />
+    <div className="space-y-8">
+      {/* MASTHEAD */}
+      <section className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
+        <div>
+          <div className="micro-label">Overview</div>
+          <h1
+            className="display-title mt-3 max-w-[16ch]"
+            style={{ fontSize: 'clamp(36px, 4.6vw, 58px)', lineHeight: 0.99 }}
+          >
+            Your accounts, <span className="serif-accent">at a glance.</span>
+          </h1>
+          <p className="text-muted mt-4 max-w-[52ch] text-[15px] leading-7">
+            A quiet read on connection health, two-step coverage, and the latest
+            messages from Telegram.
+          </p>
+        </div>
+        <div className="sm:text-right shrink-0">
+          <div className="micro-label">Online now</div>
+          <div className="display-title text-[32px] mt-1 tabular-nums">{onlineCount}</div>
+          <div className="text-[11px] text-muted mt-1">of {stats.total} accounts</div>
+        </div>
+      </section>
+
+      {/* STAT GRID */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 stagger">
+        <Stat label="Total accounts" value={stats.total} accent="--accent-sun" />
+        <Stat label="Connected" value={stats.connected} accent="--accent-mint" />
+        <Stat label="Disconnected" value={disconnected} accent="--accent-peach" />
+        <Stat label="Banned" value={stats.banned} accent="--accent-rose" />
+        <Stat label="2FA enabled" value={stats.with_2fa} accent="--accent-sky"
+              hint={without2fa > 0 ? `${without2fa} without 2FA` : 'All protected'} />
+        <Stat label="Unread alerts" value={totalAlerts} accent="--accent-rose"
+              hint={totalAlerts > 0 ? 'Needs a look' : 'All clear'} />
       </div>
 
-      {/* HEALTH BAR */}
-      <div className="nb-card p-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="font-extrabold uppercase text-sm">Account Health</div>
-          <div className="text-xs opacity-70">
-            <span className="font-bold">{onlineCount}</span> online •{' '}
-            <span className="font-bold">{stats.connected}</span> connected •{' '}
-            <span className="font-bold">{stats.with_2fa}/{stats.total}</span> with 2FA
+      {/* HEALTH */}
+      <div className="nb-card p-5">
+        <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+          <div>
+            <div className="micro-label">At a glance</div>
+            <div className="display-title text-[20px] mt-1">Connection health</div>
+          </div>
+          <div className="text-[11px] text-muted text-right">
+            <span className="font-mono text-ink">{onlineCount}</span> online ·{' '}
+            <span className="font-mono text-ink">{stats.connected}</span> connected ·{' '}
+            <span className="font-mono text-ink">{stats.with_2fa}/{stats.total}</span> with 2FA
           </div>
         </div>
         <StatusBar stats={stats} total={stats.total || 1} />
-        <div className="flex gap-4 mt-2 text-[11px] flex-wrap">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-brand-ok border border-black" /> Connected ({stats.connected})</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-brand-warn border border-black" /> Disconnected ({Math.max(stats.total - stats.connected - stats.banned, 0)})</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 bg-brand-err border border-black" /> Banned ({stats.banned})</span>
+        <div className="flex gap-5 mt-3 flex-wrap">
+          <LegendDot tone="bg-brand-ok"   label="Connected"    count={stats.connected} />
+          <LegendDot tone="bg-brand-warn" label="Disconnected" count={disconnected} />
+          <LegendDot tone="bg-brand-err"  label="Banned"       count={stats.banned} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* ACCOUNT TABLE (2/3) */}
-        <div className="lg:col-span-2 nb-card p-4">
-          <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <div className="font-extrabold uppercase">All Accounts ({filtered.length}/{accounts.length})</div>
+        {/* ACCOUNT TABLE */}
+        <div className="lg:col-span-2 nb-card p-5 min-w-0">
+          <div className="flex items-end gap-3 mb-4 flex-wrap">
+            <div>
+              <div className="micro-label">Directory</div>
+              <div className="display-title text-[20px] mt-1">
+                All accounts <span className="font-mono text-[12px] text-muted tracking-normal">({filtered.length}/{accounts.length})</span>
+              </div>
+            </div>
             <div className="ml-auto flex gap-2 items-center flex-wrap">
-              <input className="nb-input !w-44 !py-1 text-xs" placeholder="Search name/phone/@"
+              <input className="nb-input !w-44 !py-2 text-xs" placeholder="Search name, phone, @"
                 value={q} onChange={(e) => setQ(e.target.value)} />
-              <select className="nb-input !w-auto !py-1 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
+              <select className="nb-input !w-auto !py-2 text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
                 <option value="all">All</option>
                 <option value="connected">Connected</option>
                 <option value="disconnected">Disconnected</option>
@@ -126,96 +172,114 @@ export default function DashboardTab({ stats, accounts, onSelect, onChange }) {
           </div>
 
           {filtered.length === 0 && (
-            <div className="text-sm opacity-60 p-4 text-center">
-              {accounts.length === 0
-                ? 'No accounts yet. Add accounts from the sidebar.'
-                : 'No accounts match this filter.'}
+            <div className="empty-state">
+              <span className="empty-icon"><Icon name={accounts.length === 0 ? 'users' : 'inbox'} size={18} /></span>
+              <div className="empty-title">
+                {accounts.length === 0 ? 'No accounts yet' : 'Nothing matches this filter'}
+              </div>
+              <div className="text-sm max-w-[32ch]">
+                {accounts.length === 0
+                  ? 'Add your first account from the sidebar to start.'
+                  : 'Try a different search or filter.'}
+              </div>
             </div>
           )}
 
-          <div className="overflow-auto max-h-[calc(100vh-360px)]">
-            <table className="w-full text-sm">
-              <thead className="text-[10px] uppercase font-extrabold sticky top-0 bg-white dark:bg-zinc-900 border-b-2 border-black dark:border-white">
-                <tr>
-                  <th className="text-left p-2">Account</th>
-                  <th className="text-left p-2">Phone</th>
-                  <th className="text-left p-2">Username</th>
-                  <th className="text-left p-2">Status</th>
-                  <th className="text-left p-2">2FA</th>
-                  <th className="text-left p-2">Alerts</th>
-                  <th className="text-left p-2">Last Seen</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((a) => (
-                  <tr key={a.id} onClick={() => onSelect(a.id)}
-                      className="border-b border-zinc-300 dark:border-zinc-700 hover:bg-brand-pri hover:text-black cursor-pointer">
-                    <td className="p-2">
-                      <div className="flex items-center gap-2">
-                        <AccountAvatar account={a} size={28} />
-                        <span className="font-bold truncate max-w-[140px]">{(a.first_name + ' ' + a.last_name).trim() || '—'}</span>
-                        {a.is_online && <span className="w-2 h-2 bg-brand-ok border border-black" title="online" />}
-                      </div>
-                    </td>
-                    <td className="p-2 font-mono text-xs">
-                      <span className="inline-flex items-center gap-1">{a.phone}<CopyButton value={a.phone} /></span>
-                    </td>
-                    <td className="p-2 font-mono text-xs">
-                      {a.username
-                        ? <span className="inline-flex items-center gap-1">@{a.username}<CopyButton value={a.username} /></span>
-                        : <span className="opacity-40">—</span>}
-                    </td>
-                    <td className="p-2">
-                      <span className="inline-flex items-center gap-1"><StatusDot status={a.status} /> <span className="text-xs uppercase">{a.status}</span></span>
-                    </td>
-                    <td className="p-2">
-                      {a.has_2fa
-                        ? <span className="nb-badge bg-brand-violet text-black">ON</span>
-                        : <span className="nb-badge bg-zinc-200 text-zinc-700">off</span>}
-                    </td>
-                    <td className="p-2">
-                      {a.unread_security > 0
-                        ? <span className="nb-badge bg-brand-err text-black">{a.unread_security}</span>
-                        : <span className="opacity-40">—</span>}
-                    </td>
-                    <td className="p-2 text-xs opacity-70">
-                      {a.last_seen ? fmtTime(a.last_seen) : '—'}
-                    </td>
+          {filtered.length > 0 && (
+            <div className="overflow-auto max-h-[calc(100vh-380px)] -mx-2">
+              <table className="nb-table text-sm">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Status</th>
+                    <th>2FA</th>
+                    <th className="!text-right">Alerts</th>
+                    <th>Last seen</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((a) => (
+                    <tr key={a.id} onClick={() => onSelect(a.id)} className="cursor-pointer">
+                      <td>
+                        <div className="flex items-center gap-2.5">
+                          <AccountAvatar account={a} size={30} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium truncate max-w-[160px]">{(a.first_name + ' ' + a.last_name).trim() || '—'}</span>
+                              {a.is_online && <span className="w-1.5 h-1.5 rounded-full bg-brand-ok shrink-0" title="online" />}
+                            </div>
+                            <div className="flex items-center gap-1.5 font-mono text-[10px] text-muted">
+                              <span>{a.phone}</span>
+                              <CopyButton value={a.phone} />
+                              {a.username && <span className="truncate">· @{a.username}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="inline-flex items-center gap-1.5">
+                          <StatusDot status={a.status} />
+                          <span className="text-[11px] text-muted capitalize">{a.status}</span>
+                        </span>
+                      </td>
+                      <td>
+                        {a.has_2fa
+                          ? <span className="nb-badge bg-brand-info">On</span>
+                          : <span className="nb-badge">Off</span>}
+                      </td>
+                      <td className="text-right">
+                        {a.unread_security > 0
+                          ? <span className="nb-badge bg-brand-err">{a.unread_security}</span>
+                          : <span className="text-muted/50">—</span>}
+                      </td>
+                      <td className="text-[11px] text-muted whitespace-nowrap">
+                        {a.last_seen ? fmtTime(a.last_seen) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {/* RECENT ALERTS (1/3) */}
-        <div className="nb-card p-4 h-fit">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-extrabold uppercase">Recent Alerts</div>
+        {/* RECENT ALERTS */}
+        <div className="nb-card p-5 h-fit min-w-0">
+          <div className="flex items-end justify-between gap-3 mb-4">
+            <div>
+              <div className="micro-label">Inbox</div>
+              <div className="display-title text-[20px] mt-1">Recent alerts</div>
+            </div>
             <div className="flex items-center gap-2">
               {totalAlerts > 0 && (
-                <button className="nb-btn !py-0.5 !px-2 text-[10px] uppercase font-extrabold"
+                <button className="nb-btn !py-1 !px-3 !text-[11px]"
                         onClick={markAllRead} disabled={marking}>
-                  {marking ? '…' : 'Mark all read'}
+                  {marking ? '…' : 'Mark read'}
                 </button>
               )}
-              <span className="nb-badge bg-brand-err text-black">{totalAlerts}</span>
+              {totalAlerts > 0 && <span className="nb-badge bg-brand-err">{totalAlerts}</span>}
             </div>
           </div>
+
           {recentAlerts.length === 0 && (
-            <div className="text-sm opacity-60">No unread security messages.</div>
+            <div className="empty-state">
+              <span className="empty-icon"><Icon name="check" size={18} /></span>
+              <div className="empty-title">Nothing unread</div>
+              <div className="text-sm max-w-[26ch]">New Telegram security messages will appear here.</div>
+            </div>
           )}
+
           <div className="space-y-2 max-h-[60vh] overflow-auto">
             {recentAlerts.map((m) => {
               const acc = accounts.find((a) => a.id === m.account_id)
               return (
-                <div key={m.id} className="nb-card-sm p-2 text-xs" onClick={() => acc && onSelect(acc.id)}>
-                  <div className="flex items-center gap-1 mb-1">
-                    <span className="nb-badge bg-brand-warn text-black !text-[9px]">{m.type}</span>
-                    <span className="opacity-70 ml-auto">{fmtTime(m.received_at)}</span>
+                <div key={m.id} className="nb-card-sm p-3 text-xs cursor-pointer hover:border-[color:var(--hairline-strong)] transition-colors" onClick={() => onOpenAlert?.(m)}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="nb-badge bg-brand-warn !text-[10px]">{m.type}</span>
+                    <span className="text-[10px] text-muted ml-auto font-mono">{fmtTime(m.received_at)}</span>
                   </div>
-                  <div className="font-mono whitespace-pre-wrap line-clamp-3">{m.message_text}</div>
-                  {acc && <div className="text-[10px] opacity-60 mt-1">→ {(acc.first_name || acc.phone)}</div>}
+                  <div className="font-mono text-[11px] whitespace-pre-wrap line-clamp-3 text-ink/80">{m.message_text}</div>
+                  {acc && <div className="text-[10px] text-muted mt-2">→ {(acc.first_name || acc.phone)}</div>}
                 </div>
               )
             })}

@@ -96,8 +96,8 @@ export default function ChatPanel({ account, className = '' }) {
   return (
     <div className={'nb-card flex flex-col h-[75vh] ' + className}>
       {/* header */}
-      <div className="flex items-center gap-2 p-2 border-b-2 border-black dark:border-white">
-        <span className="font-extrabold uppercase tracking-tight text-sm shrink-0">Chat</span>
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-[color:var(--hairline)]">
+        <span className="micro-label shrink-0">Chat</span>
         {peer && (
           <>
             <span className="font-bold truncate">{peer.title}</span>
@@ -110,7 +110,7 @@ export default function ChatPanel({ account, className = '' }) {
       </div>
 
       {/* open bar — paste @username or t.me link (referral links supported) */}
-      <div className="p-2 border-b-2 border-black dark:border-white space-y-1">
+      <div className="px-4 py-3 border-b border-[color:var(--hairline)] space-y-2">
         <div className="flex gap-2">
           <input
             className="nb-input !py-1 text-sm"
@@ -129,20 +129,28 @@ export default function ChatPanel({ account, className = '' }) {
       </div>
 
       {notConnected && (
-        <div className="px-2 py-1 text-[11px] bg-brand-warn text-black border-b-2 border-black dark:border-white">
+        <div className="nb-note nb-note-warn mx-4 mt-3 px-3 py-2 text-[11px]">
           This account is <b>{account.status}</b> — connect it to chat.
         </div>
       )}
 
       {/* messages */}
-      <div ref={listRef} className="flex-1 overflow-auto p-2 space-y-1 bg-zinc-50 dark:bg-zinc-950/40">
+      <div ref={listRef} className="flex-1 overflow-auto p-4 space-y-2 bg-paper">
         {!peer && (
-          <div className="h-full flex items-center justify-center text-center text-xs opacity-50 px-4">
-            Open a chat above by pasting a @username or a t.me link to start messaging like Telegram.
+          <div className="empty-state h-full">
+            <span className="empty-icon"><span className="text-lg">↗</span></span>
+            <div className="empty-title">Open a conversation</div>
+            <div className="text-sm max-w-[34ch]">
+              Paste a @username or a t.me link above to start messaging the way you would in Telegram.
+            </div>
           </div>
         )}
         {peer && messages.length === 0 && (
-          <div className="h-full flex items-center justify-center text-xs opacity-50">No messages yet.</div>
+          <div className="empty-state h-full">
+            <span className="empty-icon"><span className="text-lg">…</span></span>
+            <div className="empty-title">No messages yet</div>
+            <div className="text-sm">Send the first one below.</div>
+          </div>
         )}
         {peer && messages.map((m) => {
           if (m.service) {
@@ -155,13 +163,15 @@ export default function ChatPanel({ account, className = '' }) {
           return (
             <div key={m.id} className={'flex ' + (m.out ? 'justify-end' : 'justify-start')}>
               <div className={
-                'max-w-[80%] px-2 py-1 border-2 border-black dark:border-white text-sm break-words ' +
-                (m.out ? 'bg-brand-pri text-black' : 'bg-white dark:bg-zinc-800')
+                'max-w-[80%] px-3 py-2 rounded-[12px] border text-sm break-words ' +
+                (m.out
+                  ? 'bg-ink text-paper border-ink'
+                  : 'bg-surface text-ink border-[color:var(--hairline)]')
               }>
                 {m.text
                   ? <span className="whitespace-pre-wrap">{m.text}</span>
                   : <span className="italic opacity-70">{m.media || '[empty]'}</span>}
-                <div className={'text-[9px] mt-0.5 text-right ' + (m.out ? 'text-black/50' : 'opacity-50')}>
+                <div className={'text-[9px] mt-1 text-right font-mono ' + (m.out ? 'text-paper/55' : 'text-muted')}>
                   {fmtTime(m.date)}
                 </div>
               </div>
@@ -172,7 +182,7 @@ export default function ChatPanel({ account, className = '' }) {
 
       {/* composer */}
       {peer && (
-        <div className="p-2 border-t-2 border-black dark:border-white flex gap-2">
+        <div className="px-4 py-3 border-t border-[color:var(--hairline)] flex gap-2">
           <input
             className="nb-input !py-1 text-sm"
             value={draft}

@@ -1,6 +1,8 @@
 """Manage one Telethon client per account, with 777000 listeners."""
 from __future__ import annotations
 import asyncio
+import base64
+import json
 import logging
 import re
 import secrets
@@ -18,8 +20,10 @@ from telethon.errors import (
     RPCError,
 )
 from telethon.tl.functions.account import UpdateProfileRequest, UpdateUsernameRequest
+from telethon.tl.functions.messages import GetBotCallbackAnswerRequest
 from telethon.tl.functions.photos import UploadProfilePhotoRequest
 from telethon.tl.types import User as TgUser
+from telethon.tl import types as tg_types
 from sqlalchemy import select
 
 from .config import settings
@@ -60,6 +64,15 @@ async def record_gone_account(db, acc: Account, reason: str):
 
 def classify_777000(text: str) -> str:
     low = text.lower()
+    # Login approval prompts (the ones with Confirm/Decline buttons) must be
+    # checked before the generic "new login" match.
+    if (
+        "request to log in" in low
+        or "authorize this request" in low
+        or "confirm this login" in low
+        or ("log in" in low and "confirm" in low)
+    ):
+        return "login_request"
     if re.search(r"login code|\b\d{5}\b", low):
         return "login_code"
     if "new login" in low or "new device" in low:
@@ -69,6 +82,36 @@ def classify_777000(text: str) -> str:
     if "delete" in low or "deactivation" in low:
         return "account_deletion"
     return "unknown"
+
+
+def extract_buttons(msg) -> list[dict]:
+    """Return the inline buttons on a message as JSON-serializable dicts.
+
+    Callback buttons carry opaque bytes that must be sent back to Telegram when
+    pressed, so they are base64-encoded for storage in SQLite.
+    """
+    markup = getattr(msg, "reply_markup", None)
+    if not isinstance(markup, (tg_types.ReplyInlineMarkup, tg_types.ReplyKeyboardMarkup)):
+        return []
+    out: list[dict] = []
+    index = 0
+    for row in markup.rows:
+        for btn in row.buttons:
+            item = {"index": index, "text": getattr(btn, "text", "") or "",
+                    "type": "other", "data": None, "url": None}
+            if isinstance(btn, tg_types.KeyboardButtonCallback):
+                item["type"] = "callback"
+                if btn.data:
+                    item["data"] = base64.b64encode(btn.data).decode("ascii")
+            elif isinstance(btn, (
+                tg_types.KeyboardButtonUrl, tg_types.KeyboardButtonWebView,
+                tg_types.KeyboardButtonSimpleWebView,
+            )):
+                item["type"] = "url"
+                item["url"] = getattr(btn, "url", None)
+            out.append(item)
+            index += 1
+    return out
 
 
 class TgClientManager:
@@ -730,6 +773,7 @@ class TgClientManager:
                 text = event.message.message or ""
                 msg_id = event.message.id
                 m_type = classify_777000(text)
+                buttons = extract_buttons(event.message)
                 async with AsyncSessionLocal() as db:
                     sm = SecurityMessage(
                         account_id=account_id,
@@ -738,6 +782,7 @@ class TgClientManager:
                         type=m_type,
                         is_read=False,
                         received_at=datetime.utcnow(),
+                        buttons_json=json.dumps(buttons),
                     )
                     db.add(sm)
                     await db.commit()
@@ -751,6 +796,7 @@ class TgClientManager:
                             "type": m_type,
                             "message_text": text,
                             "received_at": sm.received_at.isoformat(),
+                            "buttons": buttons,
                         })
                     except Exception:
                         pass
@@ -811,15 +857,29 @@ class TgClientManager:
         Marks them as already-read so the user isn't flooded with old alerts."""
         async with AsyncSessionLocal() as db:
             res = await db.execute(
-                select(SecurityMessage.tg_msg_id).where(SecurityMessage.account_id == account_id)
+                select(SecurityMessage.id, SecurityMessage.tg_msg_id)
+                .where(SecurityMessage.account_id == account_id)
             )
-            seen = {row[0] for row in res.all()}
+            seen = {row[1]: row[0] for row in res.all()}
         added = 0
+        updated = 0
         try:
             async for msg in cli.iter_messages(SERVICE_ID, limit=limit):
-                if msg.id in seen:
-                    continue
                 text = msg.message or ""
+                buttons = extract_buttons(msg)
+                if msg.id in seen:
+                    # Existing row (e.g. saved before button support): refresh its
+                    # buttons so old login-approval prompts become actionable.
+                    if buttons:
+                        async with AsyncSessionLocal() as db:
+                            sm = await db.get(SecurityMessage, seen[msg.id])
+                            if sm and sm.buttons_json != json.dumps(buttons):
+                                sm.buttons_json = json.dumps(buttons)
+                                if sm.type == "unknown":
+                                    sm.type = classify_777000(text)
+                                await db.commit()
+                                updated += 1
+                    continue
                 if not text:
                     continue
                 m_type = classify_777000(text)
@@ -831,14 +891,52 @@ class TgClientManager:
                         type=m_type,
                         is_read=True,  # backfilled history: don't spam unread
                         received_at=msg.date.replace(tzinfo=None) if msg.date else datetime.utcnow(),
+                        buttons_json=json.dumps(buttons),
                     )
                     db.add(sm)
                     await db.commit()
                 added += 1
         except Exception as e:
             log.warning("backfill iter failed for account %s: %s", account_id, e)
-        if added:
-            log.info("backfilled %d 777000 messages for account %s", added, account_id)
+        if added or updated:
+            log.info("backfilled %d 777000 messages for account %s (%d button sets refreshed)",
+                     added, account_id, updated)
+
+    async def press_service_button(self, account_id: int, tg_msg_id: int, index: int,
+                                   data_b64: str | None = None) -> str:
+        """Press an inline callback button (Confirm/Decline) on a 777000 message.
+
+        Tries Telethon's high-level click first; if the message was fetched
+        without an entity cache entry (so `buttons` is unavailable), falls back
+        to sending the stored callback data directly.
+        """
+        cli = self._clients.get(account_id)
+        if not cli or not cli.is_connected():
+            raise RuntimeError("Account not connected")
+        msg = await cli.get_messages(SERVICE_ID, ids=tg_msg_id)
+        first_err: Exception | None = None
+        if msg is not None:
+            try:
+                answer = await msg.click(i=index)
+                return getattr(answer, "message", None) or "ok"
+            except IndexError:
+                raise ValueError("That button is no longer available")
+            except Exception as e:
+                first_err = e
+        if not data_b64:
+            if msg is None:
+                raise ValueError("This message no longer exists on Telegram")
+            raise first_err or ValueError("Could not press that button")
+        peer = getattr(msg, "input_chat", None) if msg is not None else None
+        if peer is None:
+            peer = await cli.get_input_entity(SERVICE_ID)
+        try:
+            answer = await cli(GetBotCallbackAnswerRequest(
+                peer=peer, msg_id=tg_msg_id, data=base64.b64decode(data_b64),
+            ))
+        except Exception:
+            raise first_err or ValueError("Could not press that button")
+        return getattr(answer, "message", None) or "ok"
 
     async def refresh_status_all(self):
         for aid, cli in list(self._clients.items()):

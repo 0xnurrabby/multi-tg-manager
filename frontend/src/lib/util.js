@@ -15,7 +15,7 @@ export function fmtTime(iso) {
 export function colorForString(s) {
   let h = 0
   for (const c of s || '') h = (h * 31 + c.charCodeAt(0)) % 360
-  return `hsl(${h} 70% 60%)`
+  return `hsl(${h} 38% 78%)`
 }
 
 export function ensureNotificationPermission() {

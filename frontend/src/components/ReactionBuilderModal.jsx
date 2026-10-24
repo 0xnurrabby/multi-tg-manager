@@ -75,11 +75,14 @@ export default function ReactionBuilderModal({ accountCount = 0, accountId = nul
   function done() { onConfirm(emojis.filter((e) => e.pct > 0)) }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="nb-card p-6 w-full max-w-lg max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-extrabold uppercase tracking-tight">Choose Reactions & %</h2>
-          <button className="nb-btn !py-1 !px-2" onClick={onClose}>✕</button>
+    <div className="fixed inset-0 z-50 bg-ink/35 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="nb-card p-6 w-full max-w-lg max-h-[88vh] flex flex-col rise" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <div className="micro-label">Reactions</div>
+            <h2 className="display-title text-[24px] mt-1">Choose reactions and share</h2>
+          </div>
+          <button className="nb-btn !py-1 !px-3" onClick={onClose}>Close</button>
         </div>
 
         <p className="text-xs opacity-70 mb-2">
@@ -91,12 +94,12 @@ export default function ReactionBuilderModal({ accountCount = 0, accountId = nul
         {/* what this chat allows */}
         {loadingAllowed && <div className="text-xs opacity-60 mb-2">Reading this chat's allowed reactions…</div>}
         {reactionsOff && (
-          <div className="nb-card-sm p-2 mb-2 bg-brand-err text-black text-xs font-bold">
-            This chat has reactions turned OFF — no reaction will work here.
+          <div className="nb-note nb-note-err px-3 py-2 mb-2 text-xs">
+            This chat has reactions turned off — no reaction will work here.
           </div>
         )}
         {allowed?.mode === 'some' && !reactionsOff && (
-          <div className="nb-card-sm p-2 mb-2 bg-brand-warn text-black text-[11px] font-bold">
+          <div className="nb-note nb-note-warn px-3 py-2 mb-2 text-[11px]">
             This chat allows only the reactions shown below. Others will be skipped.
           </div>
         )}
@@ -111,13 +114,13 @@ export default function ReactionBuilderModal({ accountCount = 0, accountId = nul
         )}
 
         {/* standard preset grid — click to add/remove */}
-        <div className="text-[11px] font-bold uppercase opacity-70 mb-1">Standard reactions</div>
+        <div className="micro-label mb-2">Standard reactions</div>
         <div className="flex gap-1 flex-wrap mb-2">
           {standardPresets.map((r) => {
             const on = hasStd(r)
             return (
               <button key={r} onClick={() => on ? removeKey(`s:${r}`) : addStandard(r)}
-                className={'w-9 h-9 text-lg border-2 border-black dark:border-white ' + (on ? 'bg-brand-pri' : 'bg-white dark:bg-zinc-900')}>
+                className={'w-9 h-9 text-lg rounded-full border transition-colors ' + (on ? 'bg-brand-pri border-[color:var(--hairline-strong)]' : 'bg-surface border-[color:var(--hairline)] hover:border-[color:var(--hairline-strong)]')}>
                 {r}
               </button>
             )
@@ -127,13 +130,13 @@ export default function ReactionBuilderModal({ accountCount = 0, accountId = nul
         {/* custom (premium) emoji this chat allows */}
         {customAllowed.length > 0 && (
           <>
-            <div className="text-[11px] font-bold uppercase opacity-70 mb-1">Custom emoji this chat allows</div>
+            <div className="micro-label mb-2">Custom emoji this chat allows</div>
             <div className="flex gap-1 flex-wrap mb-2">
               {customAllowed.map((c) => {
                 const on = hasCustom(c.id)
                 return (
                   <button key={c.id} title={`custom emoji ${c.id}`} onClick={() => on ? removeKey(`c:${c.id}`) : addCustom(c)}
-                    className={'h-9 px-2 text-lg border-2 border-black dark:border-white flex items-center gap-1 ' + (on ? 'bg-brand-pri' : 'bg-white dark:bg-zinc-900')}>
+                    className={'h-9 px-2 text-lg rounded-full border flex items-center gap-1 transition-colors ' + (on ? 'bg-brand-pri border-[color:var(--hairline-strong)]' : 'bg-surface border-[color:var(--hairline)] hover:border-[color:var(--hairline-strong)]')}>
                     <span>{c.alt || '⭐'}</span>
                     <span className="text-[9px] font-bold opacity-60">★</span>
                   </button>
@@ -154,7 +157,7 @@ export default function ReactionBuilderModal({ accountCount = 0, accountId = nul
         {/* per-emoji percentage bars */}
         <div className="nb-card-sm p-3 mb-3 space-y-2 overflow-auto flex-1">
           <div className="flex items-center mb-1">
-            <span className="font-bold text-xs uppercase">% of accounts per reaction</span>
+            <span className="micro-label">Share of accounts per reaction</span>
             <button className="nb-btn !py-0.5 !px-1 text-[10px] ml-2" onClick={evenSplit}>Even split</button>
             <span className={'text-xs ml-auto font-bold ' + (totalPct > 100 ? 'text-brand-err' : 'opacity-70')}>
               total {totalPct}%

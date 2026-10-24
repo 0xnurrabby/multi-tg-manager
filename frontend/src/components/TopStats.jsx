@@ -1,27 +1,40 @@
-function Pill({ label, value, color = 'bg-white' }) {
+function Chip({ label, value, accent }) {
   return (
-    <div className={`nb-stat-sm px-3 py-1 ${color} flex items-center gap-2`}>
-      <span className="text-[10px] font-extrabold uppercase">{label}</span>
-      <span className="font-mono font-extrabold">{value}</span>
+    <div className="stat-chip">
+      {accent && (
+        <span
+          className="w-1.5 h-1.5 rounded-full shrink-0"
+          style={{ background: `rgb(var(${accent}))` }}
+        />
+      )}
+      <span className="micro-label">{label}</span>
+      <span className="font-mono text-[12px] leading-none tracking-tight">{value}</span>
     </div>
   )
 }
 
 export default function TopStats({ stats, onBellClick }) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <Pill label="Total"     value={stats.total} />
-      <Pill label="Connected" value={stats.connected} color="bg-brand-ok" />
-      <Pill label="Banned"    value={stats.banned}    color="bg-brand-err" />
-      <Pill label="2FA"       value={stats.with_2fa}  color="bg-brand-violet" />
-      <button onClick={onBellClick} className="relative nb-stat-sm bg-white px-3 py-1 flex items-center gap-2 hover:translate-x-[1px] hover:translate-y-[1px] transition-transform">
-        <span className="text-[10px] font-extrabold uppercase">Alerts</span>
-        <span className="font-mono font-extrabold">{stats.unread_security}</span>
+    <div className="flex items-center gap-1.5 flex-wrap">
+      <Chip label="Total" value={stats.total} />
+      <Chip label="Connected" value={stats.connected} accent="--accent-mint" />
+      <Chip label="Banned" value={stats.banned} accent="--accent-rose" />
+      <Chip label="2FA" value={stats.with_2fa} accent="--accent-sky" />
+      <button
+        onClick={onBellClick}
+        className="stat-chip transition-colors hover:border-[color:var(--hairline-strong)]"
+        title="Open security messages"
+      >
         {stats.unread_security > 0 && (
-          <span className="absolute -top-2 -right-2 inline-flex items-center justify-center min-w-[20px] h-5 px-1 text-[10px] font-bold bg-brand-err text-black border-2 border-black">
-            {stats.unread_security}
-          </span>
+          <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'rgb(var(--accent-rose))' }} />
         )}
+        <span className="micro-label">Alerts</span>
+        <span
+          className="font-mono text-[12px] leading-none tracking-tight"
+          style={stats.unread_security > 0 ? { color: 'rgb(var(--danger))' } : undefined}
+        >
+          {stats.unread_security}
+        </span>
       </button>
     </div>
   )

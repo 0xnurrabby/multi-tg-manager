@@ -28,15 +28,12 @@ export function ToastProvider({ children }) {
           <div
             key={t.id}
             className={
-              'nb-card-sm px-4 py-3 font-bold text-sm ' +
-              (t.kind === 'success'
-                ? 'bg-brand-ok text-black'
-                : t.kind === 'error'
-                ? 'bg-brand-err text-black'
-                : 'bg-brand-info text-black')
+              'toast ' +
+              (t.kind === 'success' ? 'toast-ok' : t.kind === 'error' ? 'toast-err' : 'toast-info')
             }
           >
-            {t.text}
+            <span className="toast-dot" />
+            <span>{t.text}</span>
           </div>
         ))}
       </div>

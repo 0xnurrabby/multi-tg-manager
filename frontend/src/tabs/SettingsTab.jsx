@@ -37,30 +37,31 @@ export default function SettingsTab() {
   return (
     <div className="max-w-2xl space-y-4">
       <div className="nb-card p-5">
-        <h3 className="font-extrabold uppercase mb-4">Rate Limit Window</h3>
-        <p className="text-xs opacity-70 mb-3">
+        <div className="micro-label">Pacing</div>
+        <h3 className="display-title text-[20px] mt-1 mb-2">Rate limit window</h3>
+        <p className="text-sm text-muted mb-4">
           Delay between each account in every bulk task (join, leave, send, react, view). Tasks run
           one account at a time and wait a random amount in this window before the next. Lower =
           faster, but too low can get accounts flagged. Default 1–2s.
         </p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label>
-            <div className="text-xs font-bold uppercase mb-1">Min seconds between actions</div>
+            <div className="micro-label mb-2">Min seconds between actions</div>
             <input type="number" step="0.1" className="nb-input" value={s.rate_min}
               onChange={(e) => setS({ ...s, rate_min: Number(e.target.value) || 0 })} />
           </label>
           <label>
-            <div className="text-xs font-bold uppercase mb-1">Max seconds</div>
+            <div className="micro-label mb-2">Max seconds</div>
             <input type="number" step="0.1" className="nb-input" value={s.rate_max}
               onChange={(e) => setS({ ...s, rate_max: Number(e.target.value) || 0 })} />
           </label>
         </div>
         <label className="block mt-3">
-          <div className="text-xs font-bold uppercase mb-1">Parallel accounts (batch size)</div>
+          <div className="micro-label mb-2">Parallel accounts, batch size</div>
           <input type="number" step="1" min="1" max="50" className="nb-input"
             value={s.concurrency ?? 5}
             onChange={(e) => setS({ ...s, concurrency: Math.max(1, parseInt(e.target.value) || 1) })} />
-          <p className="text-xs opacity-70 mt-1">
+          <p className="text-xs text-muted mt-2">
             How many accounts a bulk task runs at once. Higher = faster. Telegram limits are
             per-account, so running different accounts in parallel is safe. Default 5.
           </p>
@@ -68,17 +69,19 @@ export default function SettingsTab() {
       </div>
 
       <div className="nb-card p-5">
-        <h3 className="font-extrabold uppercase mb-4">Session Files</h3>
+        <div className="micro-label">Storage</div>
+        <h3 className="display-title text-[20px] mt-1 mb-4">Session files</h3>
         <label className="block">
-          <div className="text-xs font-bold uppercase mb-1">Sessions folder path</div>
+          <div className="micro-label mb-2">Sessions folder path</div>
           <input className="nb-input" value={s.sessions_dir}
             onChange={(e) => setS({ ...s, sessions_dir: e.target.value })} />
-          <p className="text-xs opacity-70 mt-1">Change takes effect on next backend restart.</p>
+          <p className="text-xs text-muted mt-2">Change takes effect on the next backend restart.</p>
         </label>
       </div>
 
       <div className="nb-card p-5">
-        <h3 className="font-extrabold uppercase mb-4">Behavior</h3>
+        <div className="micro-label">Preferences</div>
+        <h3 className="display-title text-[20px] mt-1 mb-4">Behaviour</h3>
         <label className="flex items-center gap-2 mb-2">
           <input type="checkbox" checked={s.auto_reconnect}
             onChange={(e) => setS({ ...s, auto_reconnect: e.target.checked })} />
@@ -92,8 +95,8 @@ export default function SettingsTab() {
       </div>
 
       <div className="flex gap-2">
-        <button className="nb-btn-pri" disabled={busy} onClick={save}>Save Settings</button>
-        <button className="nb-btn" onClick={exportJson}>Export Accounts JSON</button>
+        <button className="nb-btn-pri" disabled={busy} onClick={save}>Save settings</button>
+        <button className="nb-btn" onClick={exportJson}>Export accounts JSON</button>
       </div>
     </div>
   )

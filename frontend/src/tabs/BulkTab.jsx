@@ -137,10 +137,10 @@ export default function BulkTab({ accounts, onDone }) {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <div className="lg:col-span-2 space-y-4">
         <div className="nb-card p-4">
-          <h3 className="font-extrabold uppercase mb-3">Bulk Profile Edit</h3>
+          <h3 className="display-title text-[20px] mb-3">Bulk profile edit</h3>
 
-          <div className="nb-card-sm p-3 mb-3 bg-zinc-50 dark:bg-zinc-800">
-            <div className="text-xs font-bold uppercase mb-2">CSV / TXT import (optional)</div>
+          <div className="nb-card-sm p-4 mb-4 bg-paper">
+            <div className="micro-label mb-2">CSV or TXT import, optional</div>
             <div className="flex items-center gap-2 flex-wrap">
               <input ref={csvRef} type="file" accept=".csv,.txt" onChange={loadCsv}
                 className="text-xs file:nb-btn file:!py-1 file:!px-2" />
@@ -166,24 +166,24 @@ export default function BulkTab({ accounts, onDone }) {
             )}
           </div>
 
-          <div className={'grid grid-cols-2 gap-3 ' + (csvRows.length > 0 ? 'opacity-50 pointer-events-none' : '')}>
+          <div className={'grid grid-cols-1 sm:grid-cols-2 gap-3 ' + (csvRows.length > 0 ? 'opacity-50 pointer-events-none' : '')}>
             <label>
-              <div className="text-xs font-bold uppercase mb-1">First Name (same for all)</div>
+              <div className="micro-label mb-2">First name, same for all</div>
               <input className="nb-input" value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="leave blank to skip" />
             </label>
             <label>
-              <div className="text-xs font-bold uppercase mb-1">Last Name (same for all)</div>
+              <div className="micro-label mb-2">Last name, same for all</div>
               <input className="nb-input" value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="leave blank to skip" />
             </label>
             <label className="col-span-2">
-              <div className="text-xs font-bold uppercase mb-1">Username (without @)</div>
+              <div className="micro-label mb-2">Username, without @</div>
               <input className="nb-input" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="leave blank to skip" />
-              <div className="text-[10px] opacity-60 mt-1">
+            <div className="text-[10px] text-muted mt-2">
                 Must be unique per account. Use "Append number" below to auto-generate (e.g., myuser1, myuser2), or use CSV for custom usernames.
               </div>
             </label>
             <label className="col-span-2">
-              <div className="text-xs font-bold uppercase mb-1">Bio (max 70)</div>
+              <div className="micro-label mb-2">Bio, max 70</div>
               <textarea maxLength={70} className="nb-input" value={bio} onChange={(e) => setBio(e.target.value)} placeholder="leave blank to skip" />
             </label>
           </div>
@@ -197,7 +197,7 @@ export default function BulkTab({ accounts, onDone }) {
           </label>
 
           <button className="nb-btn-pri mt-3" disabled={busy} onClick={applyProfile}>
-            Apply Profile to {ids.length}
+            Apply profile to {ids.length}
             {csvRows.length > 0 && ids.length > 0 && (
               <span className="ml-1 opacity-70">(using CSV — {Math.min(ids.length, csvRows.length)} mapped)</span>
             )}
@@ -205,7 +205,7 @@ export default function BulkTab({ accounts, onDone }) {
         </div>
 
         <div className="nb-card p-4">
-          <h3 className="font-extrabold uppercase mb-3">Bulk Profile Photo</h3>
+          <h3 className="display-title text-[20px] mb-3">Bulk profile photo</h3>
           <div className="flex items-center gap-2 mb-3 flex-wrap">
             <input ref={photoRef} type="file" accept="image/*" multiple onChange={addPhotos}
               className="text-xs file:nb-btn file:!py-1 file:!px-2" />
@@ -222,15 +222,15 @@ export default function BulkTab({ accounts, onDone }) {
               )}
             </div>
           </div>
-          <div className="text-[11px] opacity-70 mb-2">
+          <div className="text-[11px] text-muted mb-3">
             Pick photos in batches (click "Choose Files" repeatedly to accumulate). Photo #1 → account #1, photo #2 → account #2, etc. Extra photos are ignored; if there are fewer photos than accounts, the remaining accounts are skipped.
           </div>
           {photos.length > 0 && (
-            <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 mb-3 max-h-72 overflow-auto p-2 bg-zinc-50 dark:bg-zinc-800 border-2 border-black dark:border-white">
+            <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 mb-3 max-h-72 overflow-auto p-2 bg-paper border border-[color:var(--hairline)] rounded-[12px]">
               {photoThumbs.map((p, i) => (
                 <div key={i} className="relative group">
-                  <img src={p.url} alt={p.name} className="w-full aspect-square object-cover border-2 border-black dark:border-white" />
-                  <span className="absolute top-0 left-0 bg-black text-white text-[10px] font-bold px-1">{i + 1}</span>
+                  <img src={p.url} alt={p.name} className="w-full aspect-square object-cover border border-[color:var(--hairline)]" />
+                  <span className="absolute top-0 left-0 bg-ink text-paper text-[10px] font-mono px-1 rounded-br-[6px]">{i + 1}</span>
                   <button onClick={() => removePhoto(i)}
                     className="absolute top-0 right-0 bg-brand-err text-black text-[10px] font-bold px-1 opacity-0 group-hover:opacity-100 transition">
                     ✕
@@ -240,18 +240,18 @@ export default function BulkTab({ accounts, onDone }) {
             </div>
           )}
           <button className="nb-btn-pri" disabled={busy || photos.length === 0 || ids.length === 0} onClick={applyPhoto}>
-            Apply Photos to {Math.min(photos.length, ids.length)} of {ids.length} accounts
+            Apply photos to {Math.min(photos.length, ids.length)} of {ids.length} accounts
           </button>
         </div>
       </div>
 
       <div className="nb-card p-4 h-fit">
-        <h3 className="font-extrabold uppercase mb-3">Pick Accounts</h3>
+        <h3 className="display-title text-[20px] mb-3">Pick accounts</h3>
         <label className="flex items-center gap-2 mb-2">
           <input type="checkbox" checked={allChecked} onChange={toggleAll} />
           <span className="font-bold text-sm">Select all ({accounts.length})</span>
         </label>
-        <div className="text-[10px] opacity-60 mb-2">
+        <div className="text-[10px] text-muted mb-2">
           Order matters: row N of CSV / photo #N → account #N (top to bottom of this list).
         </div>
         <div className="space-y-1 max-h-[60vh] overflow-auto">

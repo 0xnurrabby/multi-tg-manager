@@ -158,6 +158,7 @@ export const Endpoints = {
   securityMessages: (accountId, onlyUnread) =>
     api.get('/api/security/messages', { account_id: accountId, only_unread: onlyUnread }),
   markRead: (id) => api.post(`/api/security/messages/${id}/read`),
+  pressSecurityButton: (id, index) => api.post(`/api/security/messages/${id}/press`, { index }),
   markAllRead: (accountId) => api.post('/api/security/messages/mark_all_read' + (accountId ? `?account_id=${accountId}` : '')),
   backfillSecurity: (accountId, limit = 50) => api.post(`/api/security/messages/${accountId}/backfill?limit=${limit}`),
   tgSessions: (id) => api.get(`/api/security/sessions/${id}`),
@@ -166,9 +167,17 @@ export const Endpoints = {
   terminateOthersAll: (onEvent) => streamNDJSON('/api/security/sessions/terminate_others_all', {}, onEvent),
 
   // bulk 2FA: how many current passwords we already remember from login, and the
-  // streaming change run (tries remembered pw first, then the bank; ≤5 per account)
+  // streaming change run (tries remembered pw first, then the bank; �5 per account)
   twofaKnown: () => api.get('/api/security/twofa_known'),
   bulk2fa: (payload, onEvent) => streamNDJSON('/api/security/bulk_2fa', payload, onEvent),
+
+  // AI chats with the target bot, one independent conversation per account
+  aiSettings: () => api.get('/api/ai/settings'),
+  saveAiSettings: (payload) => api.put('/api/ai/settings', payload),
+  clearAiKey: () => api.del('/api/ai/settings'),
+  aiStatus: (limit = 30) => api.get('/api/ai/chat/status', { limit }),
+  startAiChats: (accountIds) => api.post('/api/ai/chat/start', { account_ids: accountIds }),
+  stopAiChats: (accountIds) => api.post('/api/ai/chat/stop', { account_ids: accountIds }),
 
   joinGroup: (id, target) => api.post(`/api/groups/${id}/join`, { target }),
   bulkJoin: (ids, target, onEvent) => streamNDJSON('/api/groups/bulk_join', { account_ids: ids, target }, onEvent),

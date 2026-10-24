@@ -252,35 +252,39 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
   useEffect(() => () => stopPolling(), [])
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={close}>
-      <div className="nb-card p-6 w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-extrabold uppercase tracking-tight text-xl">
-            Add Account {step === 3 && method === 'phone' && <span className="nb-badge bg-brand-violet text-black ml-2">2FA</span>}
-            {method === 'qr' && qrState === 'needs_2fa' && <span className="nb-badge bg-brand-violet text-black ml-2">2FA</span>}
-          </h2>
-          <button className="nb-btn !py-1 !px-2" onClick={close}>✕</button>
+    <div className="fixed inset-0 z-50 bg-ink/35 flex items-center justify-center p-4" onClick={close}>
+      <div className="nb-card p-6 w-full max-w-2xl max-h-[90vh] overflow-auto rise" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <div className="micro-label">New account</div>
+            <h2 className="display-title text-[26px] mt-1 flex items-center gap-2">
+              Add an account
+              {step === 3 && method === 'phone' && <span className="nb-badge bg-brand-info">2FA</span>}
+              {method === 'qr' && qrState === 'needs_2fa' && <span className="nb-badge bg-brand-info">2FA</span>}
+            </h2>
+          </div>
+          <button className="nb-btn !py-1 !px-3" onClick={close}>Close</button>
         </div>
 
-        <div className="flex gap-1 mb-4">
+        <div className="flex gap-1 p-1 mb-5 rounded-full border border-[color:var(--hairline)] bg-paper w-full sm:w-fit">
           <button
-            className={`nb-tab flex-1 ${method === 'phone' ? 'nb-tab-active' : ''}`}
+            className={`nb-tab flex-1 sm:flex-none ${method === 'phone' ? 'nb-tab-active' : ''}`}
             onClick={() => setMethod('phone')}
           >Phone</button>
           <button
-            className={`nb-tab flex-1 ${method === 'qr' ? 'nb-tab-active' : ''}`}
+            className={`nb-tab flex-1 sm:flex-none ${method === 'qr' ? 'nb-tab-active' : ''}`}
             onClick={() => setMethod('qr')}
-          >QR Code</button>
+          >QR code</button>
           <button
-            className={`nb-tab flex-1 ${method === 'session' ? 'nb-tab-active' : ''}`}
+            className={`nb-tab flex-1 sm:flex-none ${method === 'session' ? 'nb-tab-active' : ''}`}
             onClick={() => setMethod('session')}
-          >Session Files</button>
+          >Session files</button>
         </div>
 
         {method === 'phone' && step === 1 && (
           <div className="space-y-3">
             <label className="block">
-              <div className="text-xs font-bold uppercase mb-1">Phone (with country code)</div>
+              <div className="micro-label mb-2">Phone, with country code</div>
               <input
                 className="nb-input"
                 value={phone}
@@ -291,7 +295,7 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
               />
             </label>
             <button className="nb-btn-pri w-full" disabled={busy} onClick={sendCode}>
-              {busy ? 'Sending…' : 'Send Code'}
+              {busy ? 'Sending…' : 'Send code'}
             </button>
           </div>
         )}
@@ -309,18 +313,18 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
               onKeyDown={(e) => { if (e.key === 'Enter') submitCode() }}
             />
             <button className="nb-btn-pri w-full" disabled={busy || !code} onClick={submitCode}>
-              {busy ? 'Verifying…' : 'Verify Code'}
+              {busy ? 'Verifying…' : 'Verify code'}
             </button>
             <button className="nb-btn w-full" disabled={busy} onClick={() => setStep(1)}>
-              Back / Resend
+              Back or resend
             </button>
           </div>
         )}
 
         {method === 'phone' && step === 3 && (
           <div className="space-y-3">
-            <div className="nb-card-sm p-3 bg-brand-violet text-black text-sm font-bold">
-              2FA enabled. Enter your Two-Step password for <span className="font-mono">{phone}</span>
+            <div className="nb-note nb-note-info px-3 py-2 text-sm">
+              2FA is enabled. Enter your Two-Step password for <span className="font-mono">{phone}</span>.
             </div>
             <input
               type="password"
@@ -334,7 +338,7 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
             <button className="nb-btn-pri w-full" disabled={busy || !pwd} onClick={submit2fa}>
               {busy ? 'Submitting…' : 'Submit 2FA'}
             </button>
-            <div className="text-[10px] opacity-60">
+            <div className="text-[10px] text-muted">
               Wrong password? You can retry without re-sending the code.
             </div>
           </div>
@@ -342,13 +346,13 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
 
         {method === 'qr' && qrState !== 'needs_2fa' && (
           <div className="space-y-3">
-            <ol className="text-xs space-y-1 opacity-80 list-decimal pl-4">
+            <ol className="text-xs space-y-1 text-muted list-decimal pl-4">
               <li>Open Telegram on your phone</li>
-              <li>Go to <b>Settings → Devices → Link Desktop Device</b></li>
+              <li>Go to <b>Settings → Devices → Link desktop device</b></li>
               <li>Scan the code below</li>
             </ol>
 
-            <div className="flex items-center justify-center bg-white rounded p-3 border-2 border-black min-h-[280px]">
+            <div className="flex items-center justify-center bg-surface rounded-[12px] p-3 border border-[color:var(--hairline)] min-h-[280px]">
               {qrImg ? (
                 <img src={qrImg} alt="Telegram QR" width="260" height="260" />
               ) : (
@@ -360,25 +364,25 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
               <div className="text-xs opacity-70 text-center">Waiting for scan…</div>
             )}
             {qrState === 'expired' && (
-              <div className="nb-card-sm p-2 bg-yellow-200 text-black text-xs font-bold text-center">
-                QR expired. Tap Refresh to get a new code.
+              <div className="nb-note nb-note-warn px-3 py-2 text-xs text-center">
+                QR expired. Refresh to get a new code.
               </div>
             )}
             {qrState === 'error' && (
-              <div className="nb-card-sm p-2 bg-red-300 text-black text-xs font-bold">
+              <div className="nb-note nb-note-err px-3 py-2 text-xs">
                 {qrError || 'Something went wrong'}
               </div>
             )}
 
             <button className="nb-btn w-full" disabled={busy} onClick={refreshQr}>
-              {busy ? 'Working…' : 'Refresh Code'}
+              {busy ? 'Working…' : 'Refresh code'}
             </button>
           </div>
         )}
 
         {method === 'qr' && qrState === 'needs_2fa' && (
           <div className="space-y-3">
-            <div className="nb-card-sm p-3 bg-brand-violet text-black text-sm font-bold">
+            <div className="nb-note nb-note-info px-3 py-2 text-sm">
               QR scanned. This account has 2FA — enter your Two-Step password.
             </div>
             <input
@@ -398,12 +402,12 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
 
         {method === 'session' && (
           <div className="space-y-3">
-            <div className="text-sm opacity-80">
-              Import one or more Telethon <span className="font-mono">.session</span> files, or paste them into the sessions folder and scan. If one file fails, the rest will still be imported.
+            <div className="text-sm text-muted">
+              Import one or more Telethon <span className="font-mono">.session</span> files, or paste them into the sessions folder and scan. If one file fails, the rest are still imported.
             </div>
 
             <label className="block">
-              <div className="text-xs font-bold uppercase mb-1">Session files</div>
+              <div className="micro-label mb-2">Session files</div>
               <input
                 type="file"
                 className="nb-input"
@@ -426,11 +430,11 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
             )}
 
             <button className="nb-btn-pri w-full" disabled={busy || sessionFiles.length === 0} onClick={importSessionFiles}>
-              {busy ? 'Importing...' : `Import ${sessionFiles.length || ''} Session File${sessionFiles.length === 1 ? '' : 's'}`}
+              {busy ? 'Importing…' : `Import ${sessionFiles.length || ''} session file${sessionFiles.length === 1 ? '' : 's'}`}
             </button>
 
             <button className="nb-btn-info w-full" disabled={busy} onClick={scanSessionsFolder}>
-              Scan Pasted Sessions Folder
+              Scan pasted sessions folder
             </button>
 
             {sessionResult && (
@@ -459,7 +463,7 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
           </div>
         )}
 
-        {hint && <div className="mt-3 text-xs opacity-70 italic">{hint}</div>}
+        {hint && <div className="mt-3 text-xs text-muted italic">{hint}</div>}
       </div>
     </div>
   )

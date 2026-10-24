@@ -11,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import init_db
 from .tg_manager import manager
+from .ai_chat import ai_manager
 from .auth import router as auth_router, require_auth
-from .routers import accounts, profile, security, groups, messaging, settings as settings_router, bulk
+from .routers import accounts, profile, security, groups, messaging, settings as settings_router, bulk, ai as ai_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("main")
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         task.cancel()
+        await ai_manager.shutdown()
         await manager.shutdown()
 
 
@@ -72,6 +74,7 @@ app.include_router(groups.router,          dependencies=PROTECTED_DEPS)
 app.include_router(messaging.router,       dependencies=PROTECTED_DEPS)
 app.include_router(settings_router.router, dependencies=PROTECTED_DEPS)
 app.include_router(bulk.router,            dependencies=PROTECTED_DEPS)
+app.include_router(ai_router.router,       dependencies=PROTECTED_DEPS)
 
 
 # Any /api/* path that didn't match a real route above returns a clean JSON 404
@@ -92,6 +95,10 @@ if STATIC_DIR.is_dir():
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
+    # Always revalidate the app shell so a rebuilt frontend is picked up on a
+    # normal refresh. Hashed assets under /assets keep their long cache.
+    NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str, request: Request):
         # never intercept the api
@@ -103,7 +110,7 @@ if STATIC_DIR.is_dir():
             return FileResponse(str(candidate))
         index = STATIC_DIR / "index.html"
         if index.is_file():
-            return FileResponse(str(index))
+            return FileResponse(str(index), headers=NO_CACHE)
         return JSONResponse({"detail": "Frontend not built. Run start.bat."}, status_code=503)
 else:
     @app.get("/")

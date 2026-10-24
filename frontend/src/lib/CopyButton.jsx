@@ -16,8 +16,10 @@ export function CopyButton({ value, label = '' }) {
       onClick={copy}
       title={`Copy ${label || value}`}
       className={
-        'inline-flex items-center justify-center w-6 h-6 border-2 border-black dark:border-white text-[10px] font-bold uppercase ' +
-        (done ? 'bg-brand-ok text-black' : 'bg-white dark:bg-zinc-900 hover:bg-brand-pri hover:text-black')
+        'inline-flex items-center justify-center w-6 h-6 rounded-full border border-[color:var(--hairline)] text-[10px] font-medium transition-colors ' +
+        (done
+          ? 'bg-brand-ok text-ink'
+          : 'bg-transparent text-muted hover:border-[color:var(--hairline-strong)] hover:text-ink')
       }
     >
       {done ? '✓' : '⧉'}

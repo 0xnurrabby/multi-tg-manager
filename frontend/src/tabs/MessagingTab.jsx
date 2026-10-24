@@ -9,19 +9,24 @@ function AccountPicker({ accounts, ids, setIds }) {
   return (
     <div className="nb-card-sm p-3">
       <div className="flex items-center gap-2 mb-2">
-        <span className="font-bold text-xs uppercase">Accounts</span>
+        <span className="micro-label">Accounts</span>
         <button className="nb-btn !py-0.5 !px-1 text-[10px]" onClick={() => setIds(accounts.map((a) => a.id))}>All</button>
         <button className="nb-btn !py-0.5 !px-1 text-[10px]" onClick={() => setIds([])}>None</button>
         <span className="text-xs opacity-70 ml-auto">{ids.length} selected</span>
       </div>
-      <div className="flex flex-wrap gap-1 max-h-32 overflow-auto">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-40 overflow-auto pr-1">
         {accounts.map((a) => (
-          <label key={a.id} className={'nb-badge cursor-pointer ' + (ids.includes(a.id) ? 'bg-brand-pri text-black' : 'bg-white text-black')}>
-            <input type="checkbox" className="mr-1"
+          <label key={a.id} className={
+            'flex items-center gap-2 px-2 py-1.5 rounded-full cursor-pointer text-[12px] transition-colors ' +
+            (ids.includes(a.id)
+              ? 'bg-brand-pri/30 text-ink'
+              : 'text-muted hover:bg-[rgb(var(--ink)/0.04)] hover:text-ink')
+          }>
+            <input type="checkbox" className="shrink-0"
               checked={ids.includes(a.id)}
               onChange={() => setIds((arr) => arr.includes(a.id) ? arr.filter((x) => x !== a.id) : [...arr, a.id])}
             />
-            {(a.first_name || a.phone).slice(0, 14)}
+            <span className="truncate">{(a.first_name || a.phone).slice(0, 18)}</span>
           </label>
         ))}
       </div>
@@ -128,45 +133,45 @@ export default function MessagingTab({ accounts, selected }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div className="nb-card p-4">
-        <h3 className="font-extrabold uppercase mb-3">Send Message</h3>
+        <h3 className="display-title text-[20px] mb-3">Send a message</h3>
         <input className="nb-input mb-2" placeholder="@username or chat link"
           value={target} onChange={(e) => setTarget(e.target.value)} />
         <textarea className="nb-input min-h-[100px] mb-2" placeholder="Message text"
           value={text} onChange={(e) => setText(e.target.value)} />
         <div className="flex gap-2">
           <button className="nb-btn-pri flex-1" disabled={busy || !target || !text} onClick={sendOne}>
-            Send (1 account)
+            Send from this account
           </button>
         </div>
         <div className="mt-4">
           <AccountPicker accounts={accounts} ids={bulkIds} setIds={setBulkIds} />
         </div>
         <button className="nb-btn mt-3 w-full" disabled={busy} onClick={sendBulk}>
-          Bulk Send from {bulkIds.length}
+          Bulk send from {bulkIds.length}
         </button>
       </div>
 
       <div className="nb-card p-4">
-        <h3 className="font-extrabold uppercase mb-3">React to Post</h3>
+        <h3 className="display-title text-[20px] mb-3">React to a post</h3>
         <input className="nb-input mb-2" placeholder="https://t.me/channel/123"
           value={postLink} onChange={(e) => setPostLink(e.target.value)} />
 
         {/* chosen reactions summary + open the % builder popup */}
         <div className="nb-card-sm p-3 mb-3">
           <div className="flex items-center gap-2 mb-2">
-            <span className="font-bold text-xs uppercase">Reactions</span>
-            <button className="nb-btn !py-0.5 !px-2 text-[11px] ml-auto" onClick={() => setReactModal(true)}>
-              Set Reactions & %
+            <span className="micro-label">Reactions</span>
+            <button className="nb-btn !py-0.5 !px-3 text-[11px] ml-auto" onClick={() => setReactModal(true)}>
+              Set reactions
             </button>
           </div>
           {emojis.length === 0 ? (
-            <div className="text-xs opacity-60">No reactions chosen yet — click “Set Reactions & %”.</div>
+            <div className="text-xs text-muted">No reactions chosen yet. Use &quot;Set reactions&quot;.</div>
           ) : (
             <div className="flex flex-wrap gap-1">
               {emojis.map((e) => (
                 <span key={keyOf(e)} className="nb-badge bg-white text-black flex items-center gap-1">
                   <span className="text-base leading-none">{e.emoji}</span>
-                  {e.custom_emoji_id && <span className="text-[9px] font-bold text-brand-violet" title="custom emoji">★</span>}
+                  {e.custom_emoji_id &&                   <span className="text-[9px] font-bold text-brand-info" title="custom emoji">★</span>}
                   <span className="font-mono text-[11px]">{e.pct}%</span>
                 </span>
               ))}
@@ -179,23 +184,24 @@ export default function MessagingTab({ accounts, selected }) {
 
         <AccountPicker accounts={accounts} ids={reactIds} setIds={setReactIds} />
         <button className="nb-btn-pri mt-3 w-full" disabled={busy} onClick={doReact}>
-          Send Reactions ({reactIds.length} accounts)
+          Send reactions ({reactIds.length} accounts)
         </button>
       </div>
 
       <div className="nb-card p-4 lg:col-span-2">
-        <h3 className="font-extrabold uppercase mb-3">View / Open Post</h3>
+        <h3 className="display-title text-[20px] mb-3">View or open a post</h3>
         <input className="nb-input mb-2" placeholder="https://t.me/channel/123"
           value={viewLink} onChange={(e) => setViewLink(e.target.value)} />
         <AccountPicker accounts={accounts} ids={viewIds} setIds={setViewIds} />
         <button className="nb-btn-pri mt-3" disabled={busy} onClick={doView}>
-          Visit Post ({viewIds.length})
+          Visit post ({viewIds.length})
         </button>
       </div>
 
       <div className="nb-card p-4 lg:col-span-2">
-        <h3 className="font-extrabold uppercase mb-1 text-brand-err">Wipe DM / Chat</h3>
-        <div className="text-[11px] opacity-70 mb-3">
+        <div className="micro-label" style={{ color: 'rgb(var(--danger))' }}>Danger zone</div>
+        <h3 className="display-title text-[20px] mt-1 mb-2">Wipe a direct chat</h3>
+        <div className="text-[11px] text-muted mb-3">
           Paste a @username (or t.me link). For every selected account, the WHOLE conversation
           with that user is deleted for <b>both sides</b> (revoke) and the chat is removed —
           it stops existing. Permanent, cannot be undone.
@@ -204,7 +210,7 @@ export default function MessagingTab({ accounts, selected }) {
           value={wipeTarget} onChange={(e) => setWipeTarget(e.target.value)} />
         <AccountPicker accounts={accounts} ids={wipeIds} setIds={setWipeIds} />
         <button className="nb-btn-err mt-3" disabled={busy || wipeIds.length === 0 || !wipeTarget.trim()} onClick={doWipe}>
-          Wipe Chat from {wipeIds.length} account{wipeIds.length === 1 ? '' : 's'}
+          Wipe chat from {wipeIds.length} account{wipeIds.length === 1 ? '' : 's'}
         </button>
       </div>
 

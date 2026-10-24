@@ -131,45 +131,47 @@ export default function GroupsTab({ accounts, selected }) {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <div className="lg:col-span-2">
         <div className="nb-card p-4 mb-4">
-          <h3 className="font-extrabold uppercase mb-3">Join Group / Channel</h3>
-          <div className="flex gap-2">
+          <h3 className="display-title text-[20px] mb-3">Join a group or channel</h3>
+          <div className="space-y-2">
             <input
               className="nb-input"
               placeholder="@username or t.me/joinchat/AAA…"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
             />
-            <button className="nb-btn-pri" disabled={busy} onClick={joinOne}>Join (1 account)</button>
-            <button className="nb-btn" disabled={busy} onClick={bulkJoin}>Bulk Join ({bulkIds.length})</button>
-            <button className="nb-btn-err" disabled={busy} onClick={bulkLeaveTarget}>Bulk Leave ({bulkIds.length})</button>
+            <div className="flex gap-2 flex-wrap">
+              <button className="nb-btn-pri" disabled={busy} onClick={joinOne}>Join from this account</button>
+              <button className="nb-btn" disabled={busy} onClick={bulkJoin}>Bulk join ({bulkIds.length})</button>
+              <button className="nb-btn-err" disabled={busy} onClick={bulkLeaveTarget}>Bulk leave ({bulkIds.length})</button>
+            </div>
           </div>
-          <div className="text-[11px] opacity-60 mt-2">
+          <div className="text-[11px] text-muted mt-2">
             Bulk Leave: selected account-er moddhe jara ei link/@username-er member, tara leave korbe.
           </div>
         </div>
 
         <div className="nb-card p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-extrabold uppercase">
-              {selected ? `Groups & Channels — ${(selected.first_name || selected.phone)}` : 'Pick an account'}
+            <h3 className="display-title text-[20px]">
+              {selected ? `${(selected.first_name || selected.phone)} — groups & channels` : 'Pick an account'}
             </h3>
             {selected && (
               <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => loadGroups(selected.id)}>Refresh</button>
             )}
           </div>
-          {loading && <div className="opacity-60 text-sm">Loading…</div>}
-          {!loading && !selected && <div className="opacity-60 text-sm">Select an account from the sidebar.</div>}
-          {!loading && selected && groups.length === 0 && <div className="opacity-60 text-sm">No groups/channels found.</div>}
+          {loading && <div className="text-muted text-sm">Loading…</div>}
+          {!loading && !selected && <div className="empty-state"><span className="empty-icon">◎</span><div className="empty-title">No account selected</div><div className="text-sm">Choose an account from the sidebar.</div></div>}
+          {!loading && selected && groups.length === 0 && <div className="empty-state"><span className="empty-icon">◎</span><div className="empty-title">No groups found</div><div className="text-sm">This account has not joined any groups or channels.</div></div>}
           <div className="space-y-2">
             {groups.map((g) => (
               <div key={g.id} className="nb-card-sm p-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="font-bold truncate flex items-center gap-1">
+                  <div className="font-medium truncate flex items-center gap-1">
                     {g.title}
                     {g.invite_link && <CopyButton value={g.invite_link} label="link" />}
                   </div>
-                  <div className="text-xs opacity-70 truncate flex items-center gap-1">
-                    <span className="nb-badge bg-white text-black !px-1 !py-0">{g.type}</span>
+                  <div className="text-[11px] text-muted truncate flex items-center gap-1">
+                    <span className="nb-badge bg-white text-ink !px-2 !py-0">{g.type}</span>
                     {g.username && (
                       <span className="flex items-center gap-1">@{g.username}<CopyButton value={g.username} /></span>
                     )}
@@ -178,10 +180,10 @@ export default function GroupsTab({ accounts, selected }) {
                 </div>
                 <button className="nb-btn-err !py-1 !px-2 text-xs" title="Delete every message YOU sent here (revoke for everyone)"
                   onClick={() => deleteMyMessages(g.id, g.title)} disabled={busy}>
-                  Del My Msgs
+                  Delete my messages
                 </button>
                 <button className="nb-btn-err !py-1 !px-2 text-xs" onClick={() => leaveOne(g.id)}>Leave</button>
-                <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => bulkLeave(g.id)}>Bulk Leave</button>
+                <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => bulkLeave(g.id)}>Bulk leave</button>
               </div>
             ))}
           </div>
@@ -189,7 +191,7 @@ export default function GroupsTab({ accounts, selected }) {
       </div>
 
       <div className="nb-card p-4 h-fit">
-        <h3 className="font-extrabold uppercase mb-3">Bulk Selection</h3>
+        <h3 className="display-title text-[20px] mb-3">Bulk selection</h3>
         <div className="flex items-center gap-2 mb-2">
           <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => setBulkIds(accounts.map((a) => a.id))}>Select all</button>
           <button className="nb-btn !py-1 !px-2 text-xs" onClick={() => setBulkIds([])}>Clear</button>
@@ -205,16 +207,16 @@ export default function GroupsTab({ accounts, selected }) {
         </div>
 
         {/* DANGER ZONE — acts on EVERY group of EVERY selected account */}
-        <div className="mt-4 pt-3 border-t-2 border-black dark:border-white">
-          <div className="text-[10px] uppercase font-extrabold tracking-tight text-brand-err mb-2">
-            Danger Zone — all groups, all selected accounts
+        <div className="mt-4 pt-4 border-t border-[color:var(--hairline)]">
+          <div className="micro-label mb-3" style={{ color: 'rgb(var(--danger))' }}>
+            Danger zone · all groups, all selected accounts
           </div>
           <div className="space-y-2">
             <button className="nb-btn-err w-full text-xs" disabled={busy || bulkIds.length === 0} onClick={bulkLeaveAll}>
-              Leave ALL groups ({bulkIds.length})
+              Leave all groups ({bulkIds.length})
             </button>
             <button className="nb-btn-err w-full text-xs" disabled={busy || bulkIds.length === 0} onClick={bulkDeleteAllMessages}>
-              Delete ALL my msgs everywhere ({bulkIds.length})
+              Delete all my messages ({bulkIds.length})
             </button>
           </div>
         </div>

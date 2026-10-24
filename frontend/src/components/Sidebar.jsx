@@ -4,6 +4,7 @@ import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import AccountAvatar from './AccountAvatar'
 import ConfirmModal from './ConfirmModal'
+import Icon from './Icon'
 
 function statusBadge(status) {
   if (status === 'connected') return <span className="nb-badge bg-brand-ok text-black">Connected</span>
@@ -95,13 +96,21 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
   }
 
   return (
-    <aside className="w-[320px] border-r-2 border-black dark:border-white bg-white dark:bg-zinc-900 flex flex-col">
-      <div className="p-3 border-b-2 border-black dark:border-white flex items-center justify-between">
-        <span className="font-extrabold uppercase tracking-tight">Accounts ({active.length})</span>
+    <aside className="app-sidebar w-[300px] xl:w-[320px] shrink-0 flex flex-col">
+      <div className="px-5 py-4 border-b border-[color:var(--hairline)] flex items-end justify-between">
+        <div>
+          <div className="micro-label">Directory</div>
+          <div className="display-title text-[22px] mt-1">Accounts</div>
+        </div>
+        <span className="nb-badge bg-brand-pri">{active.length}</span>
       </div>
       <div className="flex-1 overflow-auto">
         {active.length === 0 && (
-          <div className="p-4 text-sm opacity-70">No accounts yet. Add your first account below.</div>
+          <div className="empty-state">
+            <span className="empty-icon"><Icon name="users" size={18} /></span>
+            <div className="empty-title">No accounts yet</div>
+            <div className="text-sm max-w-[28ch]">Add your first Telegram account to begin.</div>
+          </div>
         )}
         {active.map((a, i) => {
           const sel = a.id === selectedId
@@ -110,41 +119,38 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
             <div
               key={a.id}
               onClick={() => onSelect(a.id)}
-              className={
-                'flex items-start gap-2 p-3 border-b-2 border-black dark:border-white cursor-pointer transition-colors ' +
-                (sel ? 'bg-brand-pri text-black' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800')
-              }
+              className={'account-row flex items-start gap-3 px-4 py-3 ' + (sel ? 'account-row-active' : '')}
             >
-              <div className="w-5 shrink-0 self-center text-right font-mono text-xs font-bold opacity-50 select-none">
+              <div className="w-5 shrink-0 self-center text-right font-mono text-[11px] tracking-wide text-muted select-none">
                 {serial}
               </div>
               <AccountAvatar account={a} size={40} showOnline />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="font-bold truncate">
+                  <div className="font-semibold text-[14px] truncate tracking-[-0.01em]">
                     {(a.first_name + ' ' + a.last_name).trim() || a.phone}
                   </div>
                   {statusBadge(a.status)}
                 </div>
-                <div className="flex items-center gap-1 text-xs font-mono truncate">
+                <div className="flex items-center gap-1 text-[11px] font-mono truncate text-muted mt-1">
                   <span className="truncate">{a.phone}</span>
                   <CopyButton value={a.phone} label="phone" />
                 </div>
                 {a.username ? (
-                  <div className="flex items-center gap-1 text-xs font-mono truncate opacity-80">
+                  <div className="flex items-center gap-1 text-[11px] font-mono truncate text-muted">
                     <span className="truncate">@{a.username}</span>
                     <CopyButton value={a.username} label="username" />
                   </div>
                 ) : (
-                  <div className="text-xs opacity-50 italic">no @username</div>
+                  <div className="text-[11px] text-muted italic">no @username</div>
                 )}
-                <div className="flex items-center gap-2 mt-1">
-                  {a.has_2fa && <span className="nb-badge bg-brand-violet text-black">2FA</span>}
+                <div className="flex items-center gap-2 mt-2">
+                  {a.has_2fa && <span className="nb-badge bg-brand-violet">2FA</span>}
                   {a.unread_security > 0 && (
-                    <span className="nb-badge bg-brand-err text-black">{a.unread_security} new</span>
+                    <span className="nb-badge bg-brand-err">{a.unread_security} new</span>
                   )}
                   <button
-                    className="ml-auto text-[10px] underline opacity-60 hover:opacity-100"
+                    className="ml-auto text-[11px] underline decoration-[color:var(--hairline)] underline-offset-2 text-muted hover:text-ink transition-colors"
                     onClick={(e) => { e.stopPropagation(); setPendingDelete(a) }}
                   >remove</button>
                 </div>
@@ -155,40 +161,40 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
       </div>
 
       {gone.length > 0 && (
-        <div className="border-t-2 border-black dark:border-white shrink-0">
+        <div className="border-t border-[color:var(--hairline)] shrink-0">
           <button
             onClick={() => setGoneOpen((o) => !o)}
-            className="w-full flex items-center gap-2 p-3 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="w-full flex items-center gap-2 px-5 py-3 text-left hover:bg-[rgb(var(--ink)/0.025)] transition-colors"
           >
-            <span className="font-extrabold uppercase tracking-tight text-sm">Gone / Banned</span>
-            <span className="nb-badge bg-brand-err text-black">{gone.length}</span>
-            <span className="ml-auto opacity-60">{goneOpen ? '▲' : '▼'}</span>
+            <span className="micro-label normal-case tracking-[0.08em]">Gone / Banned</span>
+            <span className="nb-badge bg-brand-err">{gone.length}</span>
+            <span className="ml-auto text-muted text-xs">{goneOpen ? 'Less' : 'More'}</span>
           </button>
           {goneOpen && (
-            <div className="max-h-72 overflow-auto border-t border-black/20 dark:border-white/20">
+            <div className="max-h-72 overflow-auto border-t border-[color:var(--hairline)]">
               {gone.map((g) => (
-                <div key={g.id} className="px-3 py-2 border-b border-black/15 dark:border-white/15 text-xs">
+                <div key={g.id} className="px-5 py-3 border-b border-[color:var(--hairline)] text-xs">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold truncate">{goneName(g)}</span>
-                    <span className={'nb-badge text-black ' + (g.reason === 'banned' ? 'bg-brand-err' : 'bg-brand-warn')}>
+                    <span className="font-semibold truncate">{goneName(g)}</span>
+                    <span className={'nb-badge ' + (g.reason === 'banned' ? 'bg-brand-err' : 'bg-brand-warn')}>
                       {g.reason}
                     </span>
-                    <span className="ml-auto font-mono opacity-60 shrink-0">was #{g.old_serial ?? '—'}</span>
+                    <span className="ml-auto font-mono text-[10px] text-muted shrink-0">was #{g.old_serial ?? '—'}</span>
                   </div>
-                  <div className="font-mono opacity-70 truncate">
+                  <div className="font-mono text-muted truncate mt-1">
                     {g.phone}{g.username ? ` · @${g.username}` : ''}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="opacity-50">{ago(g.gone_at)}</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-muted">{ago(g.gone_at)}</span>
                     <button
-                      className="ml-auto text-[10px] underline opacity-50 hover:opacity-100"
+                      className="ml-auto text-[10px] underline text-muted hover:text-ink transition-colors"
                       onClick={() => dismissGone(g.id)}
                     >dismiss</button>
                   </div>
                 </div>
               ))}
-              <div className="p-2 text-center">
-                <button className="text-[10px] underline opacity-60 hover:opacity-100" onClick={clearGone}>
+              <div className="p-3 text-center">
+                <button className="text-[10px] underline text-muted hover:text-ink transition-colors" onClick={clearGone}>
                   clear all history
                 </button>
               </div>
@@ -197,15 +203,18 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
         </div>
       )}
 
-      <div className="p-3 border-t-2 border-black dark:border-white shrink-0">
+      <div className="px-5 py-4 border-t border-[color:var(--hairline)] shrink-0 space-y-2">
         <button
-          className="nb-btn-err w-full mb-2"
+          className="nb-btn-err w-full"
           disabled={totalAccounts === 0 || removeAllBusy}
           onClick={() => setConfirmRemoveAll(true)}
         >
-          Remove All Accounts
+          Remove all accounts
         </button>
-        <button className="nb-btn-pri w-full" onClick={onAdd}>+ Add Account</button>
+        <button className="nb-btn-pri w-full" onClick={onAdd}>
+          <Icon name="plus" size={16} />
+          Add account
+        </button>
       </div>
 
       {pendingDelete && (
@@ -233,10 +242,11 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
       )}
 
       {passwordRemoveAll && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={closeRemoveAllPassword}>
-          <div className="nb-card p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
-            <h2 className="font-extrabold uppercase tracking-tight mb-2">Enter password</h2>
-            <div className="text-sm opacity-80 mb-4">
+        <div className="fixed inset-0 z-50 bg-ink/35 flex items-center justify-center p-4" onClick={closeRemoveAllPassword}>
+          <div className="nb-card p-6 w-full max-w-sm rise" onClick={(e) => e.stopPropagation()}>
+            <div className="micro-label">Confirm identity</div>
+            <h2 className="display-title text-[24px] mt-2 mb-2">Enter password</h2>
+            <div className="text-sm text-muted mb-4">
               Type the app password from your env file to remove all accounts.
             </div>
             <input

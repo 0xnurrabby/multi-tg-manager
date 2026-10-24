@@ -33,6 +33,44 @@ async def init_db():
     from . import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if _is_sqlite:
+            await _migrate_sqlite(conn)
+
+
+async def _migrate_sqlite(conn):
+    """Lightweight column migrations for existing SQLite databases.
+
+    `create_all` never alters an existing table, so new model columns must be
+    added explicitly here. Safe to run on every start (idempotent).
+    """
+    res = await conn.exec_driver_sql("PRAGMA table_info('security_messages')")
+    cols = {row[1] for row in res.all()}
+    if "buttons_json" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE security_messages ADD COLUMN buttons_json TEXT DEFAULT '[]'"
+        )
+    if "action_status" not in cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE security_messages ADD COLUMN action_status VARCHAR(32) DEFAULT ''"
+        )
+
+    res = await conn.exec_driver_sql("PRAGMA table_info('ai_chat_messages')")
+    ai_cols = {row[1] for row in res.all()}
+    if "reply_to_text" not in ai_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE ai_chat_messages ADD COLUMN reply_to_text TEXT"
+        )
+    if "reaction" not in ai_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE ai_chat_messages ADD COLUMN reaction VARCHAR(8)"
+        )
+
+    res = await conn.exec_driver_sql("PRAGMA table_info('ai_chat_profiles')")
+    prof_cols = {row[1] for row in res.all()}
+    if "reset_at" not in prof_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE ai_chat_profiles ADD COLUMN reset_at DATETIME"
+        )
 
 
 async def get_db():

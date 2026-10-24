@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 const KEY = 'mtm.theme'
 
 export function useTheme() {
-  const [theme, setTheme] = useState(() => localStorage.getItem(KEY) || 'dark')
+  const [theme, setTheme] = useState(() => localStorage.getItem(KEY) || 'light')
   useEffect(() => {
     const root = document.documentElement
     if (theme === 'dark') root.classList.add('dark')

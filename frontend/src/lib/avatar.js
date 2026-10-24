@@ -10,6 +10,30 @@ const _subs = new Map()
 
 const TTL_MS = 5 * 60 * 1000 // 5 min — pic doesn't change often
 
+// Keep a handful of avatar requests in flight at once. Browsers only open ~6
+// connections per origin; without this, 100+ avatars can queue ahead of the
+// requests the user actually waiting on (security messages, chats, saves).
+const MAX_AVATAR_CONCURRENCY = 4
+let _active = 0
+const _queue = []
+
+function _pump() {
+  while (_active < MAX_AVATAR_CONCURRENCY && _queue.length) {
+    const job = _queue.shift()
+    _active += 1
+    job.run()
+      .then(job.resolve, job.reject)
+      .finally(() => { _active -= 1; _pump() })
+  }
+}
+
+function _limited(run) {
+  return new Promise((resolve, reject) => {
+    _queue.push({ run, resolve, reject })
+    _pump()
+  })
+}
+
 function notify(id) {
   const set = _subs.get(id)
   if (!set) return
@@ -40,7 +64,7 @@ export async function fetchAvatar(id) {
   if (_inflight.has(id)) return _inflight.get(id)
   const p = (async () => {
     try {
-      const r = await Endpoints.photoUrl(id)
+      const r = await _limited(() => Endpoints.photoUrl(id))
       const url = r?.data_url || null
       _cache.set(id, { dataUrl: url, ts: Date.now() })
       return url

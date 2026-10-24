@@ -10,7 +10,7 @@ from datetime import datetime
 
 from ..db import get_db, AsyncSessionLocal
 from ..models import SecurityMessage, Account
-from ..schemas import SecurityMessageOut, TgSessionOut, Bulk2faIn
+from ..schemas import SecurityMessageOut, TgSessionOut, Bulk2faIn, PressServiceButtonIn
 from ..tg_manager import manager
 from .. import secrets_store
 from ..utils import bulk_stream
@@ -37,6 +37,32 @@ async def mark_read(msg_id: int, db: AsyncSession = Depends(get_db)):
     m.is_read = True
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/messages/{msg_id}/press")
+async def press_button(msg_id: int, body: PressServiceButtonIn, db: AsyncSession = Depends(get_db)):
+    """Press a callback button (e.g. Confirm/Decline on a login approval)."""
+    m = await db.get(SecurityMessage, msg_id)
+    if not m:
+        raise HTTPException(404, "Not found")
+    btn = next((b for b in m.buttons if b.get("index") == body.index), None)
+    if not btn:
+        raise HTTPException(400, "That button is no longer available")
+    if btn.get("type") != "callback":
+        raise HTTPException(400, "This button cannot be pressed from here")
+    cli = manager.get(m.account_id)
+    if not cli:
+        raise HTTPException(409, "Account not connected")
+    try:
+        answer = await manager.press_service_button(
+            m.account_id, m.tg_msg_id, body.index, btn.get("data"),
+        )
+    except Exception as e:
+        raise HTTPException(400, str(e) or e.__class__.__name__)
+    m.action_status = btn.get("text") or "pressed"
+    m.is_read = True
+    await db.commit()
+    return {"ok": True, "answer": answer, "action_status": m.action_status}
 
 
 @router.post("/messages/mark_all_read")
