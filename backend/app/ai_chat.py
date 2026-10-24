@@ -668,7 +668,7 @@ class AIChatManager:
                     if stop.is_set():
                         break
 
-                if last.direction == "bot" and last.tg_msg_id and random.random() < 0.18:
+                if last and last.direction == "bot" and last.tg_msg_id and random.random() < 0.18:
                     emoji = random.choice(REACTION_EMOJIS)
                     if await self._react(cli, entity, last.tg_msg_id, emoji):
                         await self._set_reaction(aid, last.tg_msg_id, emoji)
