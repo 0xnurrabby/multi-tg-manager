@@ -282,10 +282,15 @@ class AiSettingsIn(BaseModel):
 
 class AiStartIn(BaseModel):
     account_ids: list[int]
+    fill_daily: bool = False
 
 
 class AiStopIn(BaseModel):
     account_ids: Optional[list[int]] = None
+
+
+class AiDailyCountsIn(BaseModel):
+    account_ids: list[int] = Field(default_factory=list)
 
 
 class BulkProgressEvent(BaseModel):

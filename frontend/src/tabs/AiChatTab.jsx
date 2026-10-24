@@ -37,7 +37,10 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
 
   const st = statusMeta(chat)
   const tone = TONES[(chat.account_id || 0) % TONES.length]
-  const progress = chat.turn_target ? `${chat.turns_done || 0} of ${chat.turn_target} chats` : ''
+  const progress = chat.turn_target
+    ? `${chat.turns_done || 0} of ${chat.turn_target} ${chat.fill_daily ? 'to fill' : 'chats'}`
+    : ''
+  const daily = chat.daily_limit ? `${chat.daily_sent || 0}/${chat.daily_limit} today` : ''
 
   return (
     <div
@@ -54,8 +57,8 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
               {chat.language && <span className="nb-badge !text-[9px]">{chat.language}</span>}
             </div>
             <div className="font-mono text-[10px] text-muted mt-1 truncate">
-              {chat.phone} · {target || DEFAULT_TARGET}
-              {chat.topic ? ` · ${chat.topic}` : ''}
+              {chat.phone} Â· {target || DEFAULT_TARGET}
+              {chat.topic ? ` Â· ${chat.topic}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -63,6 +66,7 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: st.color }} />
               {st.label}
             </span>
+            {daily && <span className="text-[10px] font-mono text-muted">{daily}</span>}
             {progress && <span className="text-[10px] font-mono text-muted">{progress}</span>}
             {chat.running && (
               <button className="nb-btn-err !py-1 !px-3 !text-[11px]" onClick={() => onStop(chat.account_id)} disabled={stopping}>
@@ -79,7 +83,7 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
       <div ref={listRef} className="p-3 space-y-2 overflow-auto bg-paper" style={{ maxHeight: '360px', minHeight: '220px' }}>
         {chat.messages.length === 0 && (
           <div className="empty-state" style={{ padding: '36px 16px' }}>
-            <span className="empty-icon"><span className="text-lg">…</span></span>
+            <span className="empty-icon"><span className="text-lg">â€¦</span></span>
             <div className="empty-title">Waiting for the first message</div>
             <div className="text-sm">The conversation will appear here.</div>
           </div>
@@ -136,6 +140,10 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const [saving, setSaving] = useState(false)
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [filling, setFilling] = useState(false)
+  const [checkingDaily, setCheckingDaily] = useState(false)
+  const [dailyCounts, setDailyCounts] = useState({})
+  const [dailyLimit, setDailyLimit] = useState(100)
   const lastFocusRef = useRef(0)
 
   useEffect(() => {
@@ -176,6 +184,24 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     tick()
     return () => { alive = false; if (timer) clearTimeout(timer) }
   }, [refreshStatus])
+
+  // Keep daily counters moving while a fill task is running.
+  useEffect(() => {
+    const chats = status?.accounts || []
+    setDailyCounts((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const chat of chats) {
+        if (!chat.daily_limit) continue
+        const value = Number(chat.daily_sent || 0)
+        if (next[chat.account_id] !== value) {
+          next[chat.account_id] = value
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [status])
 
   // A sidebar account click on the AI tab focuses that account's live chat.
   useEffect(() => {
@@ -310,6 +336,70 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     }
   }
 
+  async function checkDaily() {
+    const ids = (selected.length
+      ? selected
+      : accounts.filter((a) => a.status === 'connected').map((a) => a.id))
+      .filter((id) => accounts.some((a) => a.id === id && a.status === 'connected'))
+    if (ids.length === 0) {
+      toast.error('No connected accounts to check')
+      return
+    }
+    setCheckingDaily(true)
+    try {
+      const r = await Endpoints.aiDailyCounts(ids)
+      setDailyCounts((prev) => ({ ...prev, ...(r.counts || {}) }))
+      if (r.daily_limit) setDailyLimit(r.daily_limit)
+      const values = Object.values(r.counts || {})
+      const total = values.reduce((sum, n) => sum + Number(n || 0), 0)
+      const full = values.filter((n) => Number(n) >= (r.daily_limit || 100)).length
+      toast.success(`Checked ${values.length} accounts: ${total} messages today${full ? `, ${full} already at 100` : ''}`)
+      if (r.errors?.length) toast.error(`${r.errors.length} account${r.errors.length === 1 ? '' : 's'} could not be checked`)
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setCheckingDaily(false)
+    }
+  }
+
+  async function fillDaily() {
+    if (!settings?.has_key) {
+      toast.error('Add your Vercel AI Gateway API key first')
+      setEditKey(true)
+      return
+    }
+    const source = selected.length ? selected : connectedAccounts.map((a) => a.id)
+    const ids = source.filter((id) => accounts.some((a) => a.id === id && a.status === 'connected'))
+    if (ids.length === 0) {
+      toast.error('No connected accounts to fill')
+      return
+    }
+    if (ids.length > 5 && !confirm(
+      `Fill today's 100 messages on ${ids.length} account${ids.length === 1 ? '' : 's'}?\n\n` +
+      `Each account is counted first, then only the remaining messages are sent.`
+    )) {
+      return
+    }
+    setFilling(true)
+    try {
+      const r = await Endpoints.startAiChats(ids, true)
+      if (r.counts) {
+        setDailyCounts((prev) => ({ ...prev, ...r.counts }))
+        if (r.daily_limit) setDailyLimit(r.daily_limit)
+      }
+      const started = r.started?.length || 0
+      const skipped = r.skipped?.length || 0
+      if (started) toast.success(`Filling ${started} account${started === 1 ? '' : 's'} to 100`)
+      if (skipped) toast.info(`${skipped} account${skipped === 1 ? ' is' : 's are'} already at 100 or running`)
+      if (r.errors?.length) toast.error(`${r.errors.length} account${r.errors.length === 1 ? '' : 's'} could not start`)
+      await refreshStatus()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setFilling(false)
+    }
+  }
+
   async function stopSelected() {
     if (selected.length === 0) {
       toast.error('Pick accounts to stop')
@@ -358,6 +448,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const focusedChat = focusChatId ? allChats.find((c) => c.account_id === focusChatId) : null
   const chatIds = new Set(allChats.map((c) => c.account_id))
   const runningCount = status?.running || 0
+  const dailyValues = Object.values(dailyCounts).map((n) => Number(n) || 0)
+  const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
+  const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
 
   return (
     <div className="space-y-5">
@@ -367,7 +460,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         <p className="text-sm text-muted mt-2 max-w-[68ch] leading-6">
           Each selected account chats with Meow, a fat fluffy orange cat who is fully
           convinced he is royalty. Every account gets its own personality and its own
-          cat conversation. The API key and model are stored only on this machine.
+          cat conversation. The daily goal is 100 messages per account, reset at
+          12:00 AM UTC every day. The API key and model are stored only on this machine.
         </p>
         <p className="text-[11px] text-muted mt-3">
           Replies are paced like a real person: read, think, type, then a short random gap.
@@ -443,7 +537,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
 
         <div className="flex items-center gap-2 mt-4 flex-wrap">
           <button className="nb-btn-pri" onClick={saveSettings} disabled={saving}>
-            {saving ? 'Saving…' : (settings?.has_key ? 'Save settings' : 'Save API key')}
+            {saving ? 'Savingâ€¦' : (settings?.has_key ? 'Save settings' : 'Save API key')}
           </button>
           {settings?.has_key && editKey && (
             <button className="nb-btn" onClick={() => { setEditKey(false); setKeyInput('') }} disabled={saving}>
@@ -473,8 +567,18 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           </div>
 
           <div className="flex items-center gap-2 mt-4 flex-wrap">
-            <button className="nb-btn-pri" onClick={runSelected} disabled={busy || stopping || selected.length === 0 || !settings?.has_key}>
-              {busy ? 'Starting…' : `Run selected (${selected.length})`}
+            <button
+              className="nb-btn-pri"
+              onClick={fillDaily}
+              disabled={filling || busy || stopping || connectedAccounts.length === 0 || !settings?.has_key}
+            >
+              {filling ? 'Filling…' : `Fill 100 (${selected.length || `all ${connectedAccounts.length}`})`}
+            </button>
+            <button className="nb-btn" onClick={checkDaily} disabled={checkingDaily || filling}>
+              {checkingDaily ? 'Checkingâ€¦' : 'Check today'}
+            </button>
+            <button className="nb-btn" onClick={runSelected} disabled={busy || filling || stopping || selected.length === 0 || !settings?.has_key}>
+              {busy ? 'Startingâ€¦' : `Run selected (${selected.length})`}
             </button>
             <button className="nb-btn-err" onClick={stopSelected} disabled={stopping || selected.length === 0}>
               Stop selected
@@ -482,6 +586,11 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <button className="nb-btn" onClick={stopAll} disabled={stopping || runningCount === 0}>
               Stop all
             </button>
+          </div>
+          <div className="text-[10px] text-muted mt-2">
+            Fill 100 counts each account's outgoing messages to the bot today, then sends only the rest.
+            With no selection it fills all connected accounts. Counts reset every day at 12:00 AM UTC.
+            Check today also checks all connected accounts when nothing is selected.
           </div>
           {!settings?.has_key && (
             <div className="nb-note nb-note-warn px-3 py-2 text-[11px] mt-3">
@@ -526,6 +635,14 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
                     {((a.first_name || '') + ' ' + (a.last_name || '')).trim() || a.phone}
                   </span>
                   <span className="ml-auto flex items-center gap-2 shrink-0">
+                    {dailyCounts[a.id] !== undefined && (
+                      <span
+                        className="font-mono text-[9px] text-muted"
+                        title={`${dailyCounts[a.id]} of ${dailyLimit} sent today`}
+                      >
+                        {dailyCounts[a.id]}/{dailyLimit}
+                      </span>
+                    )}
                     <span className="font-mono text-[9px] text-muted">{a.status}</span>
                     {chatIds.has(a.id) && (
                       <button
@@ -560,6 +677,10 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="flex justify-between gap-2"><span>Cat chats</span><span className="font-mono text-ink">{allChats.length}</span></div>
             <div className="flex justify-between gap-2"><span>Chats per account</span><span className="font-mono text-ink">{settings?.min_turns ?? 4} to {settings?.max_turns ?? 10}</span></div>
             <div className="flex justify-between gap-2"><span>Model</span><span className="font-mono text-ink truncate max-w-[160px]">{settings?.model || DEFAULT_MODEL}</span></div>
+            <div className="flex justify-between gap-2"><span>Checked today</span><span className="font-mono text-ink">{dailyValues.length} accounts</span></div>
+            <div className="flex justify-between gap-2"><span>Messages today</span><span className="font-mono text-ink">{dailyTotal}</span></div>
+            <div className="flex justify-between gap-2"><span>At daily limit</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
+            <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">12:00 AM UTC</span></div>
           </div>
           <div className="text-[10px] text-muted mt-4 leading-5">
             Each account has its own style and its own history. Stopping one account does not affect the others. Chats use your AI Gateway credits while running.
@@ -595,7 +716,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         {chats.length === 0 ? (
           <div className="nb-card">
             <div className="empty-state">
-              <span className="empty-icon"><span className="text-lg">…</span></span>
+              <span className="empty-icon"><span className="text-lg">â€¦</span></span>
               <div className="empty-title">No cat chats yet</div>
               <div className="text-sm max-w-[40ch]">Pick a few accounts above and run them. Meow chats will appear here.</div>
             </div>

@@ -176,7 +176,8 @@ export const Endpoints = {
   saveAiSettings: (payload) => api.put('/api/ai/settings', payload),
   clearAiKey: () => api.del('/api/ai/settings'),
   aiStatus: (limit = 30) => api.get('/api/ai/chat/status', { limit }),
-  startAiChats: (accountIds) => api.post('/api/ai/chat/start', { account_ids: accountIds }),
+  aiDailyCounts: (accountIds) => api.post('/api/ai/chat/daily_counts', { account_ids: accountIds }),
+  startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }),
   stopAiChats: (accountIds) => api.post('/api/ai/chat/stop', { account_ids: accountIds }),
 
   joinGroup: (id, target) => api.post(`/api/groups/${id}/join`, { target }),

@@ -15,7 +15,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, desc
 from telethon.tl.functions.messages import SendReactionRequest
@@ -28,6 +28,44 @@ from .tg_manager import manager
 log = logging.getLogger("ai_chat")
 
 GATEWAY_BASE = "https://ai-gateway.vercel.sh/v1"
+DAILY_LIMIT = 100
+DAILY_RESET_HOUR_UTC = 0
+
+
+def daily_reset_utc() -> datetime:
+    """Return the most recent 12:00 AM UTC (midnight) daily reset."""
+    now = datetime.now(timezone.utc)
+    reset = now.replace(hour=DAILY_RESET_HOUR_UTC, minute=0, second=0, microsecond=0)
+    if now < reset:
+        reset -= timedelta(days=1)
+    return reset
+
+
+def _message_age_seconds(created_at) -> float:
+    if not created_at:
+        return 10 ** 9
+    dt = created_at
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return max(0.0, (datetime.utcnow() - dt).total_seconds())
+
+
+async def count_sent_today(cli, target: str) -> int:
+    """Count outgoing Telegram messages to the target since the local 06:00 reset."""
+    entity = await cli.get_entity(target.lstrip("@"))
+    reset = daily_reset_utc()
+    count = 0
+    async for m in cli.iter_messages(entity, limit=1000):
+        date = getattr(m, "date", None)
+        if date is None:
+            continue
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=timezone.utc)
+        if date < reset:
+            break
+        if getattr(m, "out", False):
+            count += 1
+    return count
 
 PERSONAS = [
     {"label": "Playful", "style": "light and playful, gently teases his royal attitude and asks fun cat questions"},
@@ -343,6 +381,8 @@ class AIChatManager:
         # AI calls are cheap but not free; this only limits simultaneous Gateway
         # calls. Every account still has its own task, profile and conversation.
         self._ai_sem = asyncio.Semaphore(10)
+        # Avoid a burst of 100+ Telegram history requests when a big fill starts.
+        self._init_sem = asyncio.Semaphore(15)
 
     # ---------- profiles ----------
     def _make_profile(self, account: Account) -> dict:
@@ -424,7 +464,10 @@ class AIChatManager:
 
     # ---------- start / stop ----------
     async def start(self, account: Account, api_key: str, model: str, target: str,
-                    min_turns: int = 4, max_turns: int = 10) -> bool:
+                    min_turns: int = 4, max_turns: int = 10,
+                    fixed_target: int | None = None, skip_start: bool = False,
+                    daily_sent: int = 0, daily_limit: int = 0,
+                    fill_daily: bool = False) -> bool:
         aid = account.id
         if self.is_running(aid):
             return False
@@ -432,7 +475,12 @@ class AIChatManager:
         profile = await self.get_profile(account)
         lo = max(1, min(int(min_turns or 4), 500))
         hi = max(lo, min(int(max_turns or 10), 500))
-        turn_target = random.randint(lo, hi)
+        if fixed_target is None:
+            turn_target = random.randint(lo, hi)
+        else:
+            turn_target = max(0, min(int(fixed_target), DAILY_LIMIT))
+        if turn_target <= 0:
+            return False
         self._state[aid] = {
             "running": True,
             "status": "starting",
@@ -441,12 +489,18 @@ class AIChatManager:
             "topic": profile["topic"],
             "turns_done": 0,
             "turn_target": turn_target,
+            "daily_sent": max(0, int(daily_sent or 0)),
+            "daily_limit": max(0, int(daily_limit or 0)),
+            "fill_daily": bool(fill_daily),
             "last_error": "",
             "started_at": _now_iso(),
             "last_activity": _now_iso(),
         }
         task = asyncio.create_task(
-            self._run(account, api_key, model, target, stop, profile, turn_target),
+            self._run(
+                account, api_key, model, target, stop, profile, turn_target,
+                skip_start=skip_start, daily_sent=int(daily_sent or 0),
+            ),
             name=f"ai-chat-{aid}",
         )
         self._tasks[aid] = task
@@ -499,7 +553,8 @@ class AIChatManager:
 
     # ---------- worker ----------
     async def _run(self, account: Account, api_key: str, model: str, target: str,
-                   stop: asyncio.Event, profile: dict, turn_target: int):
+                   stop: asyncio.Event, profile: dict, turn_target: int,
+                   skip_start: bool = False, daily_sent: int = 0):
         aid = account.id
         name = (account.first_name or "").strip() or f"user {aid}"
         turns_done = 0
@@ -509,56 +564,83 @@ class AIChatManager:
             cli = manager.get(aid)
             if not cli or not cli.is_connected():
                 raise RuntimeError("Account is not connected")
-            entity = await cli.get_entity(target.lstrip("@"))
-
-            await self._seed_history(cli, entity, aid, profile.get("reset_at"))
+            async with self._init_sem:
+                entity = await cli.get_entity(target.lstrip("@"))
+                await self._seed_history(cli, entity, aid, profile.get("reset_at"))
             history = await self._load_history(aid, 24, profile.get("reset_at"))
             force_first = False
             if not any(m.direction == "me" for m in history):
-                sent = await cli.send_message(entity, "/start")
-                await self._persist(aid, "me", "/start", sent.id)
-                self._set(aid, status="waiting", last_activity=_now_iso())
-                next_send_at = loop.time() + random.uniform(10, 25)
-                await self._wait_for_bot(aid, cli, entity, sent.id, stop, timeout=20)
-                history = await self._load_history(aid, 24, profile.get("reset_at"))
-                if not any(m.direction == "bot" for m in history):
-                    # Some bots do not send a fresh welcome on /start. Send one
-                    # cat greeting anyway so the chat is not stuck forever.
+                if skip_start:
+                    # Daily fill must not spend one of the remaining messages on
+                    # /start, and many accounts have never opened this chat.
                     force_first = True
-                    next_send_at = loop.time()
+                    next_send_at = loop.time() + random.uniform(2, 6)
+                else:
+                    sent = await cli.send_message(entity, "/start")
+                    await self._persist(aid, "me", "/start", sent.id)
+                    self._set(aid, status="waiting", last_activity=_now_iso())
+                    next_send_at = loop.time() + random.uniform(10, 25)
+                    await self._wait_for_bot(aid, cli, entity, sent.id, stop, timeout=20)
+                    history = await self._load_history(aid, 24, profile.get("reset_at"))
+                    if not any(m.direction == "bot" for m in history):
+                        # Some bots do not send a fresh welcome on /start. Send one
+                        # cat greeting anyway so the chat is not stuck forever.
+                        force_first = True
+                        next_send_at = loop.time()
+
+            if history and history[-1].direction == "me":
+                if _message_age_seconds(history[-1].created_at) >= 90:
+                    # A previous run may have stopped after sending without a
+                    # reply. Waiting for a reply to that old message is what made
+                    # fill jobs sit forever, so start a fresh turn instead.
+                    force_first = True
+                    next_send_at = loop.time() + random.uniform(5, 12)
+                    self._set(aid, status="starting", last_error="", last_activity=_now_iso())
 
             consecutive_errors = 0
+            bot_timeouts = 0
+            stop_note = ""
             while not stop.is_set():
                 if turns_done >= turn_target:
                     break
 
                 history = await self._load_history(aid, 24, profile.get("reset_at"))
-                if not history:
+                if not history and not force_first:
                     await self._sleep_or_stop(stop, 5)
                     continue
 
-                last = history[-1]
-                if last.direction == "me" and not force_first:
+                last = history[-1] if history else None
+                if last and last.direction == "me" and not force_first:
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     after = last.tg_msg_id or 0
                     got = await self._wait_for_bot(aid, cli, entity, after, stop, timeout=120)
                     if stop.is_set():
                         break
                     if not got:
+                        bot_timeouts += 1
+                        if bot_timeouts >= 2:
+                            stop_note = "Meow did not reply. Stopped instead of waiting forever."
+                            break
                         self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
-                        await self._sleep_or_stop(stop, 20)
+                        await self._sleep_or_stop(stop, 15)
                         continue
+                    bot_timeouts = 0
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
                     if not last:
                         continue
 
-                if last.direction != "bot" and not force_first:
+                if last and last.direction != "bot" and not force_first:
                     await self._sleep_or_stop(stop, 5)
                     continue
 
                 if force_first:
                     force_first = False
+                    if skip_start:
+                        self._set(aid, status="starting", last_error="", last_activity=_now_iso())
+                        await self._sleep_or_stop(stop, random.uniform(5, 12))
+                        if stop.is_set():
+                            break
                 else:
                     # Human gap between messages. The bot may send more while we wait.
                     wait = next_send_at - loop.time()
@@ -627,7 +709,7 @@ class AIChatManager:
                     break
 
                 # Sometimes quote the bot's last message, like a real reply.
-                quote = bool(last.direction == "bot" and last.tg_msg_id and random.random() < 0.34)
+                quote = bool(last and last.direction == "bot" and last.tg_msg_id and random.random() < 0.34)
                 reply_to = last.tg_msg_id if quote else None
                 try:
                     sent = await cli.send_message(entity, reply, reply_to=reply_to)
@@ -636,21 +718,41 @@ class AIChatManager:
                     quote = False
                     sent = await cli.send_message(entity, reply)
                 await self._persist(aid, "me", reply, sent.id,
-                                    reply_to_text=last.text if quote else None)
+                                    reply_to_text=last.text if quote and last else None)
                 turns_done += 1
+                daily_sent += 1
                 next_send_at = loop.time() + random.uniform(8, 22)
-                self._set(aid, turns_done=turns_done, status="waiting", last_activity=_now_iso())
+                self._set(
+                    aid, turns_done=turns_done, daily_sent=daily_sent,
+                    status="waiting", last_activity=_now_iso(),
+                )
 
                 got = await self._wait_for_bot(aid, cli, entity, sent.id, stop, timeout=120)
                 if stop.is_set():
                     break
                 if got:
+                    bot_timeouts = 0
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
+                    bot_timeouts += 1
+                    if bot_timeouts >= 2:
+                        stop_note = "Meow stopped replying. Account stopped instead of hanging."
+                        break
                     await self._sleep_or_stop(stop, 10)
 
-            final_status = "completed" if turns_done >= turn_target else "stopped"
-            self._set(aid, running=False, status=final_status, last_activity=_now_iso())
+            if turns_done >= turn_target:
+                final_status = "completed"
+                stop_note = ""
+            elif stop_note:
+                final_status = "error"
+            else:
+                final_status = "stopped"
+            current_error = self._state.get(aid, {}).get("last_error") or ""
+            self._set(
+                aid, running=False, status=final_status,
+                last_error=stop_note or ("" if final_status == "completed" else current_error),
+                last_activity=_now_iso(),
+            )
         except asyncio.CancelledError:
             self._set(aid, running=False, status="stopped", last_activity=_now_iso())
             raise
@@ -816,7 +918,9 @@ class AIChatManager:
                 quiet_until = loop.time() + 1.5
             elif got and loop.time() >= quiet_until:
                 return True
-            await self._sleep_or_stop(stop, 1.0)
+            # Do not hammer Telegram with one history request per second per
+            # account. Many accounts run at the same time.
+            await self._sleep_or_stop(stop, 2.5)
         return got
 
     # ---------- AI ----------

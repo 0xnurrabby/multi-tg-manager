@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,10 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import Account, AiChatMessage, AiChatProfile
-from ..schemas import AiSettingsIn, AiStartIn, AiStopIn
+from ..schemas import AiDailyCountsIn, AiSettingsIn, AiStartIn, AiStopIn
 from ..tg_manager import manager
 from .. import ai_store
-from ..ai_chat import ai_manager, validate_gateway, GatewayError
+from ..ai_chat import (
+    DAILY_LIMIT,
+    GatewayError,
+    ai_manager,
+    count_sent_today,
+    daily_reset_utc,
+    validate_gateway,
+)
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -52,6 +60,27 @@ def _msg_dict(m: AiChatMessage) -> dict:
         "reaction": m.reaction,
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
+
+
+async def _daily_counts(accounts: list[Account], target: str) -> tuple[dict[int, int], list[dict]]:
+    sem = asyncio.Semaphore(10)
+
+    async def one(acc: Account):
+        cli = manager.get(acc.id)
+        if not cli or not cli.is_connected():
+            raise RuntimeError("Account is not connected")
+        async with sem:
+            return await count_sent_today(cli, target)
+
+    counts: dict[int, int] = {}
+    errors: list[dict] = []
+    results = await asyncio.gather(*(one(a) for a in accounts), return_exceptions=True)
+    for acc, result in zip(accounts, results):
+        if isinstance(result, Exception):
+            errors.append({"account_id": acc.id, "error": str(result)[:200]})
+        else:
+            counts[acc.id] = int(result)
+    return counts, errors
 
 
 @router.get("/settings")
@@ -146,6 +175,9 @@ async def chat_status(limit: int = 30, db: AsyncSession = Depends(get_db)):
             "topic": st.get("topic") or (prof.topic if prof else fallback.get("topic")),
             "turns_done": int(st.get("turns_done") or 0),
             "turn_target": int(st.get("turn_target") or 0),
+            "daily_sent": int(st.get("daily_sent") or 0),
+            "daily_limit": int(st.get("daily_limit") or 0),
+            "fill_daily": bool(st.get("fill_daily")),
             "last_error": st.get("last_error") or "",
             "started_at": st.get("started_at"),
             "last_activity": last_activity,
@@ -174,6 +206,38 @@ async def chat_messages(account_id: int, after_id: int = 0, limit: int = 100,
     return {"messages": [_msg_dict(m) for m in res.scalars().all()]}
 
 
+@router.get("/chat/daily")
+async def daily_counts_info():
+    return {"daily_limit": DAILY_LIMIT, "reset_at": daily_reset_utc().isoformat()}
+
+
+@router.post("/chat/daily_counts")
+async def daily_counts(body: AiDailyCountsIn, db: AsyncSession = Depends(get_db)):
+    cfg = await ai_store.get_settings()
+    target = _normalize_target(cfg.get("target")) or ai_store.DEFAULT_TARGET
+
+    q = select(Account)
+    if body.account_ids:
+        q = q.where(Account.id.in_(body.account_ids), Account.status != "banned")
+    else:
+        q = q.where(Account.status == "connected")
+    res = await db.execute(q)
+    accounts = list(res.scalars().all())
+    counts, errors = await _daily_counts(accounts, target)
+
+    seen = {a.id for a in accounts}
+    for aid in body.account_ids:
+        if aid not in seen:
+            errors.append({"account_id": aid, "error": "Account not found"})
+
+    return {
+        "daily_limit": DAILY_LIMIT,
+        "reset_at": daily_reset_utc().isoformat(),
+        "counts": counts,
+        "errors": errors,
+    }
+
+
 @router.post("/chat/start")
 async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
     if not body.account_ids:
@@ -189,26 +253,58 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
     )
     accounts = list(res.scalars().all())
     started: list[int] = []
+    skipped: list[int] = []
     errors: list[dict] = []
+    counts: dict[int, int] = {}
+    if body.fill_daily:
+        counts, count_errors = await _daily_counts(accounts, target)
+        errors.extend(count_errors)
+
     seen = set()
     for acc in accounts:
         seen.add(acc.id)
         if not manager.get(acc.id):
-            errors.append({"account_id": acc.id, "error": "Account is not connected"})
+            if not any(e["account_id"] == acc.id for e in errors):
+                errors.append({"account_id": acc.id, "error": "Account is not connected"})
             continue
+        remaining = None
+        if body.fill_daily:
+            if ai_manager.is_running(acc.id):
+                skipped.append(acc.id)
+                continue
+            if acc.id not in counts:
+                continue
+            remaining = DAILY_LIMIT - counts[acc.id]
+            if remaining <= 0:
+                skipped.append(acc.id)
+                continue
         try:
             ok = await ai_manager.start(
                 acc, cfg["api_key"], model, target,
                 cfg.get("min_turns") or 4, cfg.get("max_turns") or 10,
+                fixed_target=remaining,
+                skip_start=body.fill_daily,
+                daily_sent=counts.get(acc.id, 0) if body.fill_daily else 0,
+                daily_limit=DAILY_LIMIT if body.fill_daily else 0,
+                fill_daily=body.fill_daily,
             )
             if ok:
                 started.append(acc.id)
+            elif body.fill_daily:
+                skipped.append(acc.id)
         except Exception as e:
             errors.append({"account_id": acc.id, "error": str(e)[:200]})
     for aid in body.account_ids:
         if aid not in seen:
             errors.append({"account_id": aid, "error": "Account not found"})
-    return {"started": started, "errors": errors, "running": len(ai_manager.running_ids())}
+    return {
+        "started": started,
+        "skipped": skipped,
+        "counts": counts,
+        "daily_limit": DAILY_LIMIT,
+        "errors": errors,
+        "running": len(ai_manager.running_ids()),
+    }
 
 
 @router.post("/chat/stop")
