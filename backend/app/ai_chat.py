@@ -28,6 +28,15 @@ from .tg_manager import manager
 log = logging.getLogger("ai_chat")
 
 GATEWAY_BASE = "https://ai-gateway.vercel.sh/v1"
+# The same model is served by providers with very different prices. Without
+# this pin the Gateway can route a cheap model to a provider that costs 5-6x
+# more. These are the reliable low-cost endpoints for DeepSeek V4 Flash.
+GATEWAY_PROVIDER_OPTIONS = {
+    "gateway": {
+        "only": ["runware", "deepinfra", "digitalocean", "wafer", "baseten"],
+        "order": ["runware", "deepinfra", "digitalocean", "wafer", "baseten"],
+    }
+}
 DAILY_LIMIT = 100
 DAILY_RESET_HOUR_UTC = 0
 
@@ -241,6 +250,8 @@ class GatewayError(Exception):
 def _gateway_request(method: str, path: str, api_key: str, payload: dict | None = None,
                      timeout: float = 45.0) -> dict:
     url = GATEWAY_BASE + path
+    if payload is not None and payload.get("model") and "providerOptions" not in payload:
+        payload = {**payload, "providerOptions": GATEWAY_PROVIDER_OPTIONS}
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {
         "Authorization": f"Bearer {api_key}",
