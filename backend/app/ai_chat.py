@@ -394,6 +394,9 @@ class AIChatManager:
         self._ai_sem = asyncio.Semaphore(10)
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
+        # The bot cannot answer 100+ conversations at once. Keep a fair queue so
+        # every account eventually gets its 100 messages without flooding Meow.
+        self._active_sem = asyncio.Semaphore(30)
 
     # ---------- profiles ----------
     def _make_profile(self, account: Account) -> dict:
@@ -469,6 +472,29 @@ class AIChatManager:
     def running_ids(self) -> list[int]:
         return [aid for aid, st in self._state.items() if st.get("running")]
 
+    def active_ids(self) -> list[int]:
+        return [
+            aid for aid, st in self._state.items()
+            if st.get("running") and st.get("status") != "queued"
+        ]
+
+    def mark_daily(self, account_id: int, daily_sent: int, daily_limit: int = DAILY_LIMIT,
+                   status: str = "completed"):
+        if self.is_running(account_id):
+            return
+        self._state[account_id] = {
+            "running": False,
+            "status": status,
+            "daily_sent": max(0, int(daily_sent or 0)),
+            "daily_limit": max(0, int(daily_limit or 0)),
+            "fill_daily": True,
+            "turns_done": 0,
+            "turn_target": 0,
+            "last_error": "",
+            "started_at": _now_iso(),
+            "last_activity": _now_iso(),
+        }
+
     def is_running(self, account_id: int) -> bool:
         task = self._tasks.get(account_id)
         return bool(task and not task.done())
@@ -494,7 +520,7 @@ class AIChatManager:
             return False
         self._state[aid] = {
             "running": True,
-            "status": "starting",
+            "status": "queued",
             "persona": profile["label"],
             "language": profile["language"],
             "topic": profile["topic"],
@@ -567,6 +593,21 @@ class AIChatManager:
                    stop: asyncio.Event, profile: dict, turn_target: int,
                    skip_start: bool = False, daily_sent: int = 0):
         aid = account.id
+        self._set(aid, status="queued", last_activity=_now_iso())
+        async with self._active_sem:
+            if stop.is_set():
+                self._set(aid, running=False, status="stopped", last_activity=_now_iso())
+                return
+            self._set(aid, status="starting", last_activity=_now_iso())
+            await self._run_inner(
+                account, api_key, model, target, stop, profile, turn_target,
+                skip_start=skip_start, daily_sent=daily_sent,
+            )
+
+    async def _run_inner(self, account: Account, api_key: str, model: str, target: str,
+                         stop: asyncio.Event, profile: dict, turn_target: int,
+                         skip_start: bool = False, daily_sent: int = 0):
+        aid = account.id
         name = (account.first_name or "").strip() or f"user {aid}"
         turns_done = 0
         loop = asyncio.get_running_loop()
@@ -610,6 +651,7 @@ class AIChatManager:
 
             consecutive_errors = 0
             bot_timeouts = 0
+            no_reply_retries = 0
             stop_note = ""
             while not stop.is_set():
                 if turns_done >= turn_target:
@@ -630,12 +672,27 @@ class AIChatManager:
                     if not got:
                         bot_timeouts += 1
                         if bot_timeouts >= 2:
-                            stop_note = "Meow did not reply. Stopped instead of waiting forever."
+                            if skip_start and no_reply_retries < 2:
+                                no_reply_retries += 1
+                                self._set(
+                                    aid, status="cooldown",
+                                    last_error="Meow did not reply. Retrying shortly.",
+                                    last_activity=_now_iso(),
+                                )
+                                await self._sleep_or_stop(stop, random.uniform(120, 180))
+                                if stop.is_set():
+                                    break
+                                bot_timeouts = 0
+                                force_first = True
+                                next_send_at = loop.time() + random.uniform(5, 15)
+                                continue
+                            stop_note = "Meow did not reply after retries."
                             break
                         self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
                         await self._sleep_or_stop(stop, 15)
                         continue
                     bot_timeouts = 0
+                    no_reply_retries = 0
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
                     if not last:
@@ -743,11 +800,26 @@ class AIChatManager:
                     break
                 if got:
                     bot_timeouts = 0
+                    no_reply_retries = 0
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
                     bot_timeouts += 1
                     if bot_timeouts >= 2:
-                        stop_note = "Meow stopped replying. Account stopped instead of hanging."
+                        if skip_start and no_reply_retries < 2:
+                            no_reply_retries += 1
+                            self._set(
+                                aid, status="cooldown",
+                                last_error="Meow did not reply. Retrying shortly.",
+                                last_activity=_now_iso(),
+                            )
+                            await self._sleep_or_stop(stop, random.uniform(120, 180))
+                            if stop.is_set():
+                                break
+                            bot_timeouts = 0
+                            force_first = True
+                            next_send_at = loop.time() + random.uniform(5, 15)
+                            continue
+                        stop_note = "Meow did not reply after retries."
                         break
                     await self._sleep_or_stop(stop, 10)
 

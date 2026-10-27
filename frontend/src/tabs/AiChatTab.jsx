@@ -24,6 +24,8 @@ function statusMeta(chat) {
     typing:   { label: 'Typing', color: 'rgb(var(--accent-sun))' },
     waiting:  { label: 'Waiting for bot', color: 'rgb(var(--accent-peach))' },
     reading:  { label: 'Reading reply', color: 'rgb(var(--accent-sky))' },
+    queued:   { label: 'Queued', color: 'rgb(var(--accent-sky))' },
+    cooldown: { label: 'Cooling down', color: 'rgb(var(--accent-peach))' },
   }
   return map[chat.status] || { label: 'Live', color: 'rgb(var(--accent-mint))' }
 }
@@ -57,8 +59,8 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
               {chat.language && <span className="nb-badge !text-[9px]">{chat.language}</span>}
             </div>
             <div className="font-mono text-[10px] text-muted mt-1 truncate">
-              {chat.phone} Â· {target || DEFAULT_TARGET}
-              {chat.topic ? ` Â· ${chat.topic}` : ''}
+              {chat.phone} · {target || DEFAULT_TARGET}
+              {chat.topic ? ` · ${chat.topic}` : ''}
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -83,7 +85,7 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
       <div ref={listRef} className="p-3 space-y-2 overflow-auto bg-paper" style={{ maxHeight: '360px', minHeight: '220px' }}>
         {chat.messages.length === 0 && (
           <div className="empty-state" style={{ padding: '36px 16px' }}>
-            <span className="empty-icon"><span className="text-lg">â€¦</span></span>
+            <span className="empty-icon"><span className="text-lg">...</span></span>
             <div className="empty-title">Waiting for the first message</div>
             <div className="text-sm">The conversation will appear here.</div>
           </div>
@@ -448,6 +450,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const focusedChat = focusChatId ? allChats.find((c) => c.account_id === focusChatId) : null
   const chatIds = new Set(allChats.map((c) => c.account_id))
   const runningCount = status?.running || 0
+  const activeCount = status?.active ?? runningCount
+  const queuedCount = status?.queued || 0
   const dailyValues = Object.values(dailyCounts).map((n) => Number(n) || 0)
   const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
   const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
@@ -537,7 +541,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
 
         <div className="flex items-center gap-2 mt-4 flex-wrap">
           <button className="nb-btn-pri" onClick={saveSettings} disabled={saving}>
-            {saving ? 'Savingâ€¦' : (settings?.has_key ? 'Save settings' : 'Save API key')}
+            {saving ? 'Saving...' : (settings?.has_key ? 'Save settings' : 'Save API key')}
           </button>
           {settings?.has_key && editKey && (
             <button className="nb-btn" onClick={() => { setEditKey(false); setKeyInput('') }} disabled={saving}>
@@ -575,10 +579,10 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
               {filling ? 'Filling…' : `Fill 100 (${selected.length || `all ${connectedAccounts.length}`})`}
             </button>
             <button className="nb-btn" onClick={checkDaily} disabled={checkingDaily || filling}>
-              {checkingDaily ? 'Checkingâ€¦' : 'Check today'}
+              {checkingDaily ? 'Checking...' : 'Check today'}
             </button>
             <button className="nb-btn" onClick={runSelected} disabled={busy || filling || stopping || selected.length === 0 || !settings?.has_key}>
-              {busy ? 'Startingâ€¦' : `Run selected (${selected.length})`}
+              {busy ? 'Starting...' : `Run selected (${selected.length})`}
             </button>
             <button className="nb-btn-err" onClick={stopSelected} disabled={stopping || selected.length === 0}>
               Stop selected
@@ -668,8 +672,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <div className="micro-label">Status</div>
           <h2 className="display-title text-[20px] mt-1">Cat chats</h2>
           <div className="flex items-baseline gap-2 mt-4">
-            <span className="display-title text-[38px] tabular-nums">{runningCount}</span>
-            <span className="text-xs text-muted">running</span>
+            <span className="display-title text-[38px] tabular-nums">{activeCount}</span>
+            <span className="text-xs text-muted">active</span>
+            {queuedCount > 0 && <span className="text-xs text-muted">· {queuedCount} queued</span>}
           </div>
           <div className="h-px bg-[color:var(--hairline)] my-4" />
           <div className="space-y-2 text-[12px] text-muted">
@@ -716,7 +721,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         {chats.length === 0 ? (
           <div className="nb-card">
             <div className="empty-state">
-              <span className="empty-icon"><span className="text-lg">â€¦</span></span>
+              <span className="empty-icon"><span className="text-lg">...</span></span>
               <div className="empty-title">No cat chats yet</div>
               <div className="text-sm max-w-[40ch]">Pick a few accounts above and run them. Meow chats will appear here.</div>
             </div>

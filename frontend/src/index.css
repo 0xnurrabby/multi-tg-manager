@@ -54,6 +54,7 @@ html.dark {
    ------------------------------------------------------------------ */
 @layer base {
   html, body, #root { height: 100%; }
+  html, body { overflow-x: hidden; }
 
   body {
     font-family: 'Inter', system-ui, sans-serif;

@@ -167,7 +167,7 @@ export const Endpoints = {
   terminateOthersAll: (onEvent) => streamNDJSON('/api/security/sessions/terminate_others_all', {}, onEvent),
 
   // bulk 2FA: how many current passwords we already remember from login, and the
-  // streaming change run (tries remembered pw first, then the bank; �5 per account)
+  // streaming change run (tries remembered pw first, then the bank; 5 per account)
   twofaKnown: () => api.get('/api/security/twofa_known'),
   bulk2fa: (payload, onEvent) => streamNDJSON('/api/security/bulk_2fa', payload, onEvent),
 
@@ -175,7 +175,7 @@ export const Endpoints = {
   aiSettings: () => api.get('/api/ai/settings'),
   saveAiSettings: (payload) => api.put('/api/ai/settings', payload),
   clearAiKey: () => api.del('/api/ai/settings'),
-  aiStatus: (limit = 30) => api.get('/api/ai/chat/status', { limit }),
+  aiStatus: (limit = 30, includeMessages = true) => api.get('/api/ai/chat/status', { limit, include_messages: includeMessages }),
   aiDailyCounts: (accountIds) => api.post('/api/ai/chat/daily_counts', { account_ids: accountIds }),
   startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }),
   stopAiChats: (accountIds) => api.post('/api/ai/chat/stop', { account_ids: accountIds }),

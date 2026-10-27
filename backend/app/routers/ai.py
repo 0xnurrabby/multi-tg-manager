@@ -131,8 +131,9 @@ async def clear_ai_key():
 
 
 @router.get("/chat/status")
-async def chat_status(limit: int = 30, db: AsyncSession = Depends(get_db)):
-    limit = max(5, min(int(limit or 30), 100))
+async def chat_status(limit: int = 30, include_messages: bool = True,
+                      db: AsyncSession = Depends(get_db)):
+    limit = max(2, min(int(limit or 30), 100))
     state = ai_manager.snapshot()
 
     res = await db.execute(select(Account))
@@ -150,16 +151,18 @@ async def chat_status(limit: int = 30, db: AsyncSession = Depends(get_db)):
             continue
         prof = profiles.get(aid)
         reset_at = prof.reset_at if prof and prof.reset_at else None
-        q = select(AiChatMessage).where(AiChatMessage.account_id == aid)
-        if reset_at is not None:
-            q = q.where(AiChatMessage.created_at >= reset_at)
-        q = q.order_by(desc(AiChatMessage.id)).limit(limit)
-        res = await db.execute(q)
-        rows = list(res.scalars().all())
-        rows.reverse()
-        msgs = [_msg_dict(m) for m in rows]
+        msgs = []
+        if include_messages:
+            q = select(AiChatMessage).where(AiChatMessage.account_id == aid)
+            if reset_at is not None:
+                q = q.where(AiChatMessage.created_at >= reset_at)
+            q = q.order_by(desc(AiChatMessage.id)).limit(limit)
+            res = await db.execute(q)
+            rows = list(res.scalars().all())
+            rows.reverse()
+            msgs = [_msg_dict(m) for m in rows]
         st = state.get(aid) or {}
-        if not msgs and not st.get("running") and not st.get("last_error"):
+        if not msgs and not st.get("running") and not st.get("last_error") and not st.get("daily_limit"):
             continue
         fallback = ai_manager.persona_for(acc)
         last_activity = st.get("last_activity") or (msgs[-1]["created_at"] if msgs else None)
@@ -188,9 +191,16 @@ async def chat_status(limit: int = 30, db: AsyncSession = Depends(get_db)):
     out.sort(key=lambda x: (1 if x["running"] else 0, str(x.get("last_activity") or "")), reverse=True)
 
     cfg = await ai_store.get_settings()
+    snapshot = ai_manager.snapshot()
+    queued = sum(
+        1 for st in snapshot.values()
+        if st.get("running") and st.get("status") == "queued"
+    )
     return {
         "settings": _public_settings(cfg),
         "running": len(ai_manager.running_ids()),
+        "active": len(ai_manager.active_ids()),
+        "queued": queued,
         "accounts": out,
     }
 
@@ -276,6 +286,7 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
                 continue
             remaining = DAILY_LIMIT - counts[acc.id]
             if remaining <= 0:
+                ai_manager.mark_daily(acc.id, counts[acc.id], DAILY_LIMIT)
                 skipped.append(acc.id)
                 continue
         try:

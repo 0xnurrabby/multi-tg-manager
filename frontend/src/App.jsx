@@ -10,6 +10,7 @@ import AddAccountModal from './components/AddAccountModal.jsx'
 import AccountPage from './components/AccountPage.jsx'
 import Icon from './components/Icon.jsx'
 import DashboardTab from './tabs/DashboardTab.jsx'
+import StatsTab from './tabs/StatsTab.jsx'
 import ProfileTab from './tabs/ProfileTab.jsx'
 import SecurityTab from './tabs/SecurityTab.jsx'
 import GroupsTab from './tabs/GroupsTab.jsx'
@@ -21,6 +22,7 @@ import SettingsTab from './tabs/SettingsTab.jsx'
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'stats',     label: 'Stats'     },
   { id: 'profile',   label: 'Profile'   },
   { id: 'security',  label: 'Security'  },
   { id: 'groups',    label: 'Groups'    },
@@ -277,6 +279,7 @@ export default function App() {
               ) : (
                 <>
                   {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={openAccount} onOpenAlert={(m) => { setSelectedId(m.account_id); setFocusAlert({ accountId: m.account_id, messageId: m.id, ts: Date.now() }); closeAccountRoute(); setTab('security') }} onChange={() => { refreshStats(); refreshAccounts() }} />}
+                  {tab === 'stats'     && <StatsTab accounts={accounts} onOpenChat={(id) => { setSelectedId(id); setSelectTick((n) => n + 1); closeAccountRoute(); setTab('ai') }} />}
                   {tab === 'profile'   && <ProfileTab account={selected} onRefresh={refreshAccounts} />}
                   {tab === 'security'  && <SecurityTab accounts={accounts} focusAlert={focusAlert} focusAccountId={selectedId} focusTick={selectTick} onChange={refreshStats} />}
                   {tab === 'groups'    && <GroupsTab accounts={accounts} selected={selected} />}
