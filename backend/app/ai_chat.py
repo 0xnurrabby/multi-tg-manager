@@ -38,16 +38,16 @@ GATEWAY_PROVIDER_OPTIONS = {
     }
 }
 DAILY_LIMIT = 100
-DAILY_RESET_HOUR_UTC = 0
+BD_TZ = timezone(timedelta(hours=6), "Asia/Dhaka")
 
 
 def daily_reset_utc() -> datetime:
-    """Return the most recent 12:00 AM UTC (midnight) daily reset."""
-    now = datetime.now(timezone.utc)
-    reset = now.replace(hour=DAILY_RESET_HOUR_UTC, minute=0, second=0, microsecond=0)
+    """Return the most recent midnight in Bangladesh time as UTC."""
+    now = datetime.now(BD_TZ)
+    reset = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if now < reset:
         reset -= timedelta(days=1)
-    return reset
+    return reset.astimezone(timezone.utc)
 
 
 def _message_age_seconds(created_at) -> float:
@@ -394,9 +394,10 @@ class AIChatManager:
         self._ai_sem = asyncio.Semaphore(10)
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
-        # The bot cannot answer 100+ conversations at once. Keep a fair queue so
-        # every account eventually gets its 100 messages without flooding Meow.
-        self._active_sem = asyncio.Semaphore(30)
+        # Every account runs together, but messages leave at a steady pace so
+        # Meow is not hit by a 100+ message burst at the same second.
+        self._send_lock = asyncio.Lock()
+        self._last_send_at = 0.0
 
     # ---------- profiles ----------
     def _make_profile(self, account: Account) -> dict:
@@ -520,7 +521,7 @@ class AIChatManager:
             return False
         self._state[aid] = {
             "running": True,
-            "status": "queued",
+            "status": "starting",
             "persona": profile["label"],
             "language": profile["language"],
             "topic": profile["topic"],
@@ -593,16 +594,15 @@ class AIChatManager:
                    stop: asyncio.Event, profile: dict, turn_target: int,
                    skip_start: bool = False, daily_sent: int = 0):
         aid = account.id
-        self._set(aid, status="queued", last_activity=_now_iso())
-        async with self._active_sem:
-            if stop.is_set():
-                self._set(aid, running=False, status="stopped", last_activity=_now_iso())
-                return
-            self._set(aid, status="starting", last_activity=_now_iso())
-            await self._run_inner(
-                account, api_key, model, target, stop, profile, turn_target,
-                skip_start=skip_start, daily_sent=daily_sent,
-            )
+        self._set(aid, status="starting", last_activity=_now_iso())
+        await self._sleep_or_stop(stop, random.uniform(0, 45))
+        if stop.is_set():
+            self._set(aid, running=False, status="stopped", last_activity=_now_iso())
+            return
+        await self._run_inner(
+            account, api_key, model, target, stop, profile, turn_target,
+            skip_start=skip_start, daily_sent=daily_sent,
+        )
 
     async def _run_inner(self, account: Account, api_key: str, model: str, target: str,
                          stop: asyncio.Event, profile: dict, turn_target: int,
@@ -628,7 +628,7 @@ class AIChatManager:
                     force_first = True
                     next_send_at = loop.time() + random.uniform(2, 6)
                 else:
-                    sent = await cli.send_message(entity, "/start")
+                    sent = await self._send_paced(cli, entity, "/start")
                     await self._persist(aid, "me", "/start", sent.id)
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     next_send_at = loop.time() + random.uniform(10, 25)
@@ -780,11 +780,11 @@ class AIChatManager:
                 quote = bool(last and last.direction == "bot" and last.tg_msg_id and random.random() < 0.34)
                 reply_to = last.tg_msg_id if quote else None
                 try:
-                    sent = await cli.send_message(entity, reply, reply_to=reply_to)
+                    sent = await self._send_paced(cli, entity, reply, reply_to=reply_to)
                 except Exception:
                     # The quoted message may have been deleted; send plain text.
                     quote = False
-                    sent = await cli.send_message(entity, reply)
+                    sent = await self._send_paced(cli, entity, reply)
                 await self._persist(aid, "me", reply, sent.id,
                                     reply_to_text=last.text if quote and last else None)
                 turns_done += 1
@@ -842,6 +842,16 @@ class AIChatManager:
         except Exception as e:
             log.warning("ai chat %s stopped: %s", aid, e)
             self._set(aid, running=False, status="error", last_error=str(e)[:300], last_activity=_now_iso())
+
+    async def _send_paced(self, cli, entity, text: str, reply_to=None):
+        loop = asyncio.get_running_loop()
+        async with self._send_lock:
+            wait = self._last_send_at + 0.32 - loop.time()
+            if wait > 0:
+                await asyncio.sleep(wait)
+            sent = await cli.send_message(entity, text, reply_to=reply_to)
+            self._last_send_at = loop.time()
+            return sent
 
     async def _mark_read(self, cli, entity):
         try:

@@ -451,7 +451,6 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const chatIds = new Set(allChats.map((c) => c.account_id))
   const runningCount = status?.running || 0
   const activeCount = status?.active ?? runningCount
-  const queuedCount = status?.queued || 0
   const dailyValues = Object.values(dailyCounts).map((n) => Number(n) || 0)
   const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
   const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
@@ -465,7 +464,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           Each selected account chats with Meow, a fat fluffy orange cat who is fully
           convinced he is royalty. Every account gets its own personality and its own
           cat conversation. The daily goal is 100 messages per account, reset at
-          12:00 AM UTC every day. The API key and model are stored only on this machine.
+          12:00 AM Bangladesh every day. The API key and model are stored only on this machine.
         </p>
         <p className="text-[11px] text-muted mt-3">
           Replies are paced like a real person: read, think, type, then a short random gap.
@@ -593,7 +592,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           </div>
           <div className="text-[10px] text-muted mt-2">
             Fill 100 counts each account's outgoing messages to the bot today, then sends only the rest.
-            With no selection it fills all connected accounts. Counts reset every day at 12:00 AM UTC.
+            With no selection it fills all connected accounts. Counts reset every day at 12:00 AM Bangladesh.
             Check today also checks all connected accounts when nothing is selected.
           </div>
           {!settings?.has_key && (
@@ -674,7 +673,6 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <div className="flex items-baseline gap-2 mt-4">
             <span className="display-title text-[38px] tabular-nums">{activeCount}</span>
             <span className="text-xs text-muted">active</span>
-            {queuedCount > 0 && <span className="text-xs text-muted">· {queuedCount} queued</span>}
           </div>
           <div className="h-px bg-[color:var(--hairline)] my-4" />
           <div className="space-y-2 text-[12px] text-muted">
@@ -685,7 +683,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="flex justify-between gap-2"><span>Checked today</span><span className="font-mono text-ink">{dailyValues.length} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Messages today</span><span className="font-mono text-ink">{dailyTotal}</span></div>
             <div className="flex justify-between gap-2"><span>At daily limit</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
-            <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">12:00 AM UTC</span></div>
+            <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">12:00 AM Bangladesh</span></div>
           </div>
           <div className="text-[10px] text-muted mt-4 leading-5">
             Each account has its own style and its own history. Stopping one account does not affect the others. Chats use your AI Gateway credits while running.

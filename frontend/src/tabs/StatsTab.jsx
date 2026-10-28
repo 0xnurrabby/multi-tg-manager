@@ -50,7 +50,6 @@ function Progress({ value, tone = '--accent-mint', height = 8 }) {
 function chatTitle(chat) {
   if (!chat) return 'Not started'
   if (chat.status === 'error') return 'Needs retry'
-  if (chat.status === 'queued') return 'Queued'
   if (chat.status === 'cooldown') return 'Cooling down'
   if (chat.running) {
     const labels = {
@@ -68,7 +67,6 @@ function chatTitle(chat) {
 function accountStatus(account, count, chat) {
   if (count >= DAILY_LIMIT) return { label: 'Done', tone: '--accent-mint' }
   if (chat?.status === 'error') return { label: 'Needs retry', tone: '--accent-rose' }
-  if (chat?.status === 'queued') return { label: 'Queued', tone: '--accent-peach' }
   if (chat?.status === 'cooldown') return { label: 'Cooling down', tone: '--accent-sun' }
   if (chat?.running) return { label: 'Working', tone: '--accent-sky' }
   if (count > 0) return { label: 'Paused', tone: '--accent-sun' }
@@ -234,9 +232,9 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
   const zero = rows.filter((r) => r.count === 0 && r.chat?.status !== 'error').length
   const errors = rows.filter((r) => r.chat?.status === 'error').length
   const active = status?.active ?? 0
-  const queued = status?.queued ?? 0
   const overall = percent(total, goal)
   const remaining = Math.max(0, goal - total)
+  const average = connected.length ? total / connected.length : 0
 
   const board = useMemo(() => {
     const list = [...rows]
@@ -247,7 +245,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
     return list
   }, [rows, filter]).sort((a, b) => (b.count - a.count) || a.account.phone.localeCompare(b.account.phone))
 
-  const resetText = '12:00 AM UTC'
+  const resetText = '12:00 AM Bangladesh'
   const model = status?.settings?.model || 'deepseek/deepseek-v4-flash-0731'
 
   return (
@@ -307,7 +305,6 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
           <div className="flex items-center gap-4 flex-wrap mt-3 text-[10px] text-muted">
             <span><span className="font-mono text-ink">{remaining.toLocaleString()}</span> remaining</span>
             <span><span className="font-mono text-ink">{active}</span> active</span>
-            <span><span className="font-mono text-ink">{queued}</span> queued</span>
             <span>Reset {resetText}</span>
             <span className="ml-auto">Counts: {lastSync ? lastSync.toLocaleTimeString() : 'waiting for Telegram...'}</span>
           </div>
@@ -318,7 +315,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
         <StatCard label="Done" value={done} hint="at 100 / 100" tone="--accent-mint" />
         <StatCard label="Working" value={working} hint="in progress" tone="--accent-sky" />
         <StatCard label="Active" value={active} hint="talking to Meow" tone="--accent-sun" />
-        <StatCard label="Queued" value={queued} hint="waiting for a slot" tone="--accent-peach" />
+        <StatCard label="Average" value={average.toFixed(1)} hint="messages / account" tone="--accent-peach" />
         <StatCard label="Not started" value={zero} hint="no messages yet" tone="--accent-peach" />
         <StatCard label="Needs retry" value={errors} hint="Meow did not reply" tone="--accent-rose" />
       </div>
@@ -369,7 +366,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
             <h2 className="display-title text-[19px] mt-1">What is happening</h2>
             <div className="space-y-3 mt-4 text-[12px] leading-6 text-muted">
               <div><span className="font-mono text-ink">{done}</span> accounts are finished. Their daily counter is at least 100.</div>
-              <div><span className="font-mono text-ink">{working}</span> accounts are still moving. <span className="font-mono text-ink">{active}</span> are talking to Meow now and <span className="font-mono text-ink">{queued}</span> are waiting in the fair queue.</div>
+              <div><span className="font-mono text-ink">{working}</span> accounts are still moving. <span className="font-mono text-ink">{active}</span> are running together now, with sends paced so Meow is not flooded.</div>
               <div><span className="font-mono text-ink">{zero}</span> accounts have not sent anything today. <span className="font-mono text-ink">{errors}</span> stopped because Meow did not reply; retry them after a short pause.</div>
               <div className="pt-2 border-t border-[color:var(--hairline)]">
                 Total today: <span className="font-mono text-ink">{total.toLocaleString()}</span> messages.
