@@ -105,6 +105,9 @@ class AiChatProfile(Base):
     # bot's character changes (for example, the new Meow cat persona) so old
     # service-style conversations do not leak into the fresh chat.
     reset_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Bangladesh calendar day when the bot stopped replying. Fill 100 skips
+    # this account until the next daily reset.
+    limit_day: Mapped[str | None] = mapped_column(String(10), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

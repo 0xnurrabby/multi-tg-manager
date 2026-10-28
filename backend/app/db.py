@@ -71,6 +71,10 @@ async def _migrate_sqlite(conn):
         await conn.exec_driver_sql(
             "ALTER TABLE ai_chat_profiles ADD COLUMN reset_at DATETIME"
         )
+    if "limit_day" not in prof_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE ai_chat_profiles ADD COLUMN limit_day VARCHAR(10)"
+        )
 
 
 async def get_db():

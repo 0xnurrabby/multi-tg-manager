@@ -15,6 +15,7 @@ function fmtClock(iso) {
 }
 
 function statusMeta(chat) {
+  if (chat.status === 'limit') return { label: 'Limit reached', color: 'rgb(var(--accent-rose))' }
   if (chat.status === 'error') return { label: 'Error', color: 'rgb(var(--accent-rose))' }
   if (chat.status === 'completed') return { label: 'Completed', color: 'rgb(var(--accent-mint))' }
   if (!chat.running) return { label: 'Stopped', color: 'rgb(var(--muted))' }
@@ -392,7 +393,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
       const started = r.started?.length || 0
       const skipped = r.skipped?.length || 0
       if (started) toast.success(`Filling ${started} account${started === 1 ? '' : 's'} to 100`)
-      if (skipped) toast.info(`${skipped} account${skipped === 1 ? ' is' : 's are'} already at 100 or running`)
+      if (skipped) toast.info(`${skipped} account${skipped === 1 ? ' is' : 's are'} already at 100, running, or limit reached`)
       if (r.errors?.length) toast.error(`${r.errors.length} account${r.errors.length === 1 ? '' : 's'} could not start`)
       await refreshStatus()
     } catch (e) {

@@ -15,6 +15,7 @@ from ..ai_chat import (
     DAILY_LIMIT,
     GatewayError,
     ai_manager,
+    bd_today,
     count_sent_today,
     daily_reset_utc,
     validate_gateway,
@@ -143,6 +144,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
     profiles = {p.account_id: p for p in res.scalars().all()}
     ids = set(state.keys()) | set(profiles.keys())
     ids &= set(accounts.keys())
+    today = bd_today()
 
     out = []
     for aid in ids:
@@ -162,7 +164,15 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
             rows.reverse()
             msgs = [_msg_dict(m) for m in rows]
         st = state.get(aid) or {}
-        if not msgs and not st.get("running") and not st.get("last_error") and not st.get("daily_limit"):
+        limit_today = bool(prof and prof.limit_day == today)
+        if limit_today and not st:
+            st = {
+                "status": "limit",
+                "running": False,
+                "daily_limit": 0,
+                "last_error": "Daily limit reached. Skipping this account until the next reset.",
+            }
+        if not msgs and not st.get("running") and not st.get("last_error") and not st.get("daily_limit") and not limit_today:
             continue
         fallback = ai_manager.persona_for(acc)
         last_activity = st.get("last_activity") or (msgs[-1]["created_at"] if msgs else None)
@@ -266,9 +276,20 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
     skipped: list[int] = []
     errors: list[dict] = []
     counts: dict[int, int] = {}
+    blocked: set[int] = set()
     if body.fill_daily:
         counts, count_errors = await _daily_counts(accounts, target)
         errors.extend(count_errors)
+        res = await db.execute(
+            select(AiChatProfile).where(
+                AiChatProfile.account_id.in_([a.id for a in accounts])
+            )
+        )
+        today = bd_today()
+        blocked = {
+            p.account_id for p in res.scalars().all()
+            if p.limit_day == today
+        }
 
     seen = set()
     for acc in accounts:
@@ -287,6 +308,14 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
             remaining = DAILY_LIMIT - counts[acc.id]
             if remaining <= 0:
                 ai_manager.mark_daily(acc.id, counts[acc.id], DAILY_LIMIT)
+                skipped.append(acc.id)
+                continue
+            if acc.id in blocked:
+                ai_manager.mark_daily(
+                    acc.id, counts[acc.id], DAILY_LIMIT,
+                    status="limit",
+                    last_error="Daily limit reached. Skipping this account until the next reset.",
+                )
                 skipped.append(acc.id)
                 continue
         try:

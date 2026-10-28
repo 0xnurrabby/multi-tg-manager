@@ -9,6 +9,7 @@ const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'working', label: 'In progress' },
   { id: 'done', label: 'Done' },
+  { id: 'limit', label: 'Limit reached' },
   { id: 'zero', label: 'Not started' },
   { id: 'error', label: 'Needs retry' },
 ]
@@ -66,6 +67,7 @@ function chatTitle(chat) {
 
 function accountStatus(account, count, chat) {
   if (count >= DAILY_LIMIT) return { label: 'Done', tone: '--accent-mint' }
+  if (chat?.status === 'limit') return { label: 'Limit reached', tone: '--accent-rose' }
   if (chat?.status === 'error') return { label: 'Needs retry', tone: '--accent-rose' }
   if (chat?.status === 'cooldown') return { label: 'Cooling down', tone: '--accent-sun' }
   if (chat?.running) return { label: 'Working', tone: '--accent-sky' }
@@ -228,19 +230,20 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
   const goal = connected.length * DAILY_LIMIT
   const total = rows.reduce((sum, r) => sum + r.count, 0)
   const done = rows.filter((r) => r.count >= DAILY_LIMIT).length
-  const working = rows.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error').length
-  const zero = rows.filter((r) => r.count === 0 && r.chat?.status !== 'error').length
+  const limits = rows.filter((r) => r.chat?.status === 'limit').length
+  const working = rows.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error' && r.chat?.status !== 'limit').length
+  const zero = rows.filter((r) => r.count === 0 && r.chat?.status !== 'error' && r.chat?.status !== 'limit').length
   const errors = rows.filter((r) => r.chat?.status === 'error').length
   const active = status?.active ?? 0
   const overall = percent(total, goal)
   const remaining = Math.max(0, goal - total)
-  const average = connected.length ? total / connected.length : 0
 
   const board = useMemo(() => {
     const list = [...rows]
     if (filter === 'done') return list.filter((r) => r.count >= DAILY_LIMIT)
-    if (filter === 'working') return list.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error')
-    if (filter === 'zero') return list.filter((r) => r.count === 0 && r.chat?.status !== 'error')
+    if (filter === 'limit') return list.filter((r) => r.chat?.status === 'limit')
+    if (filter === 'working') return list.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error' && r.chat?.status !== 'limit')
+    if (filter === 'zero') return list.filter((r) => r.count === 0 && r.chat?.status !== 'error' && r.chat?.status !== 'limit')
     if (filter === 'error') return list.filter((r) => r.chat?.status === 'error')
     return list
   }, [rows, filter]).sort((a, b) => (b.count - a.count) || a.account.phone.localeCompare(b.account.phone))
@@ -266,7 +269,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
             </h1>
             <p className="text-sm text-muted mt-3 leading-6">
               {done} account{done === 1 ? '' : 's'} finished 100 messages. {working} still working,
-              {' '}{zero} not started, and {errors} need a retry. The limit is 100 per connected account.
+              {' '}{limits} hit the bot limit, {zero} not started, and {errors} need a retry.
             </p>
           </div>
           <div className="shrink-0 flex items-center gap-2 flex-wrap">
@@ -315,9 +318,9 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
         <StatCard label="Done" value={done} hint="at 100 / 100" tone="--accent-mint" />
         <StatCard label="Working" value={working} hint="in progress" tone="--accent-sky" />
         <StatCard label="Active" value={active} hint="talking to Meow" tone="--accent-sun" />
-        <StatCard label="Average" value={average.toFixed(1)} hint="messages / account" tone="--accent-peach" />
+        <StatCard label="Limit reached" value={limits} hint="skip until reset" tone="--accent-rose" />
         <StatCard label="Not started" value={zero} hint="no messages yet" tone="--accent-peach" />
-        <StatCard label="Needs retry" value={errors} hint="Meow did not reply" tone="--accent-rose" />
+        <StatCard label="Needs retry" value={errors} hint="other errors" tone="--accent-rose" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -367,7 +370,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
             <div className="space-y-3 mt-4 text-[12px] leading-6 text-muted">
               <div><span className="font-mono text-ink">{done}</span> accounts are finished. Their daily counter is at least 100.</div>
               <div><span className="font-mono text-ink">{working}</span> accounts are still moving. <span className="font-mono text-ink">{active}</span> are running together now, with sends paced so Meow is not flooded.</div>
-              <div><span className="font-mono text-ink">{zero}</span> accounts have not sent anything today. <span className="font-mono text-ink">{errors}</span> stopped because Meow did not reply; retry them after a short pause.</div>
+              <div><span className="font-mono text-ink">{limits}</span> accounts hit the bot limit after 2 quiet replies and are skipped until reset. <span className="font-mono text-ink">{zero}</span> have not sent anything yet; <span className="font-mono text-ink">{errors}</span> have other errors.</div>
               <div className="pt-2 border-t border-[color:var(--hairline)]">
                 Total today: <span className="font-mono text-ink">{total.toLocaleString()}</span> messages.
                 {' '}Still left: <span className="font-mono text-ink">{remaining.toLocaleString()}</span>.

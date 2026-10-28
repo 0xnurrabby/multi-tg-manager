@@ -50,6 +50,10 @@ def daily_reset_utc() -> datetime:
     return reset.astimezone(timezone.utc)
 
 
+def bd_today() -> str:
+    return datetime.now(BD_TZ).date().isoformat()
+
+
 def _message_age_seconds(created_at) -> float:
     if not created_at:
         return 10 ** 9
@@ -480,7 +484,7 @@ class AIChatManager:
         ]
 
     def mark_daily(self, account_id: int, daily_sent: int, daily_limit: int = DAILY_LIMIT,
-                   status: str = "completed"):
+                   status: str = "completed", last_error: str = ""):
         if self.is_running(account_id):
             return
         self._state[account_id] = {
@@ -491,10 +495,23 @@ class AIChatManager:
             "fill_daily": True,
             "turns_done": 0,
             "turn_target": 0,
-            "last_error": "",
+            "last_error": last_error,
             "started_at": _now_iso(),
             "last_activity": _now_iso(),
         }
+
+    async def _mark_limit_reached(self, account_id: int):
+        day = bd_today()
+        try:
+            async with AsyncSessionLocal() as db:
+                prof = await db.scalar(
+                    select(AiChatProfile).where(AiChatProfile.account_id == account_id)
+                )
+                if prof:
+                    prof.limit_day = day
+                    await db.commit()
+        except Exception as e:
+            log.warning("could not save daily limit for %s: %s", account_id, e)
 
     def is_running(self, account_id: int) -> bool:
         task = self._tasks.get(account_id)
@@ -651,7 +668,7 @@ class AIChatManager:
 
             consecutive_errors = 0
             bot_timeouts = 0
-            no_reply_retries = 0
+            limit_reached = False
             stop_note = ""
             while not stop.is_set():
                 if turns_done >= turn_target:
@@ -672,27 +689,14 @@ class AIChatManager:
                     if not got:
                         bot_timeouts += 1
                         if bot_timeouts >= 2:
-                            if skip_start and no_reply_retries < 2:
-                                no_reply_retries += 1
-                                self._set(
-                                    aid, status="cooldown",
-                                    last_error="Meow did not reply. Retrying shortly.",
-                                    last_activity=_now_iso(),
-                                )
-                                await self._sleep_or_stop(stop, random.uniform(120, 180))
-                                if stop.is_set():
-                                    break
-                                bot_timeouts = 0
-                                force_first = True
-                                next_send_at = loop.time() + random.uniform(5, 15)
-                                continue
-                            stop_note = "Meow did not reply after retries."
+                            await self._mark_limit_reached(aid)
+                            limit_reached = True
+                            stop_note = "Daily limit reached. Skipping this account until the next reset."
                             break
                         self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
                         await self._sleep_or_stop(stop, 15)
                         continue
                     bot_timeouts = 0
-                    no_reply_retries = 0
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
                     if not last:
@@ -800,32 +804,21 @@ class AIChatManager:
                     break
                 if got:
                     bot_timeouts = 0
-                    no_reply_retries = 0
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
                     bot_timeouts += 1
                     if bot_timeouts >= 2:
-                        if skip_start and no_reply_retries < 2:
-                            no_reply_retries += 1
-                            self._set(
-                                aid, status="cooldown",
-                                last_error="Meow did not reply. Retrying shortly.",
-                                last_activity=_now_iso(),
-                            )
-                            await self._sleep_or_stop(stop, random.uniform(120, 180))
-                            if stop.is_set():
-                                break
-                            bot_timeouts = 0
-                            force_first = True
-                            next_send_at = loop.time() + random.uniform(5, 15)
-                            continue
-                        stop_note = "Meow did not reply after retries."
+                        await self._mark_limit_reached(aid)
+                        limit_reached = True
+                        stop_note = "Daily limit reached. Skipping this account until the next reset."
                         break
                     await self._sleep_or_stop(stop, 10)
 
             if turns_done >= turn_target:
                 final_status = "completed"
                 stop_note = ""
+            elif limit_reached:
+                final_status = "limit"
             elif stop_note:
                 final_status = "error"
             else:
