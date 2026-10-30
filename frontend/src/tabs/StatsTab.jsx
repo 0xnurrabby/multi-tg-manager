@@ -248,7 +248,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
     return list
   }, [rows, filter]).sort((a, b) => (b.count - a.count) || a.account.phone.localeCompare(b.account.phone))
 
-  const resetText = '12:00 AM Bangladesh'
+  const resetText = '6:00 AM Bangladesh'
   const model = status?.settings?.model || 'deepseek/deepseek-v4-flash-0731'
 
   return (

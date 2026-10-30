@@ -15,7 +15,7 @@ from ..ai_chat import (
     DAILY_LIMIT,
     GatewayError,
     ai_manager,
-    bd_today,
+    bd_day_key,
     count_sent_today,
     daily_reset_utc,
     validate_gateway,
@@ -144,7 +144,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
     profiles = {p.account_id: p for p in res.scalars().all()}
     ids = set(state.keys()) | set(profiles.keys())
     ids &= set(accounts.keys())
-    today = bd_today()
+    today = bd_day_key()
 
     out = []
     for aid in ids:
@@ -285,7 +285,7 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
                 AiChatProfile.account_id.in_([a.id for a in accounts])
             )
         )
-        today = bd_today()
+        today = bd_day_key()
         blocked = {
             p.account_id for p in res.scalars().all()
             if p.limit_day == today

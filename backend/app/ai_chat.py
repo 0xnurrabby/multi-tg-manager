@@ -42,16 +42,17 @@ BD_TZ = timezone(timedelta(hours=6), "Asia/Dhaka")
 
 
 def daily_reset_utc() -> datetime:
-    """Return the most recent midnight in Bangladesh time as UTC."""
+    """Return the most recent 06:00 Bangladesh time as UTC."""
     now = datetime.now(BD_TZ)
-    reset = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    reset = now.replace(hour=6, minute=0, second=0, microsecond=0)
     if now < reset:
         reset -= timedelta(days=1)
     return reset.astimezone(timezone.utc)
 
 
-def bd_today() -> str:
-    return datetime.now(BD_TZ).date().isoformat()
+def bd_day_key() -> str:
+    """Label the current 06:00-to-06:00 Bangladesh bot day."""
+    return (datetime.now(BD_TZ) - timedelta(hours=6)).date().isoformat()
 
 
 def _message_age_seconds(created_at) -> float:
@@ -388,6 +389,16 @@ def _language_ok(text: str, language: str) -> bool:
     return not has_bengali_script and markers == 0
 
 
+BOT_LIMIT_RE = re.compile(
+    r"(daily limit|100 texts today|sent me 100|pausing until)",
+    re.I,
+)
+
+
+def _is_limit_message(text: str) -> bool:
+    return bool(BOT_LIMIT_RE.search(text or ""))
+
+
 class AIChatManager:
     def __init__(self):
         self._tasks: dict[int, asyncio.Task] = {}
@@ -501,7 +512,7 @@ class AIChatManager:
         }
 
     async def _mark_limit_reached(self, account_id: int):
-        day = bd_today()
+        day = bd_day_key()
         try:
             async with AsyncSessionLocal() as db:
                 prof = await db.scalar(
@@ -680,6 +691,11 @@ class AIChatManager:
                     continue
 
                 last = history[-1] if history else None
+                if last and last.direction == "bot" and _is_limit_message(last.text):
+                    await self._mark_limit_reached(aid)
+                    limit_reached = True
+                    stop_note = "Daily limit reached. Skipping this account until the next reset."
+                    break
                 if last and last.direction == "me" and not force_first:
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     after = last.tg_msg_id or 0
