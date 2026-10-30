@@ -68,6 +68,7 @@ function chatTitle(chat) {
 function accountStatus(account, count, chat) {
   if (count >= DAILY_LIMIT) return { label: 'Done', tone: '--accent-mint' }
   if (chat?.status === 'limit') return { label: 'Limit reached', tone: '--accent-rose' }
+  if (chat?.status === 'paused') return { label: 'Paused', tone: '--accent-sun' }
   if (chat?.status === 'error') return { label: 'Needs retry', tone: '--accent-rose' }
   if (chat?.status === 'cooldown') return { label: 'Cooling down', tone: '--accent-sun' }
   if (chat?.running) return { label: 'Working', tone: '--accent-sky' }
@@ -231,8 +232,9 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
   const total = rows.reduce((sum, r) => sum + r.count, 0)
   const done = rows.filter((r) => r.count >= DAILY_LIMIT).length
   const limits = rows.filter((r) => r.chat?.status === 'limit').length
-  const working = rows.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error' && r.chat?.status !== 'limit').length
-  const zero = rows.filter((r) => r.count === 0 && r.chat?.status !== 'error' && r.chat?.status !== 'limit').length
+  const paused = rows.filter((r) => r.chat?.status === 'paused').length
+  const working = rows.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error' && r.chat?.status !== 'limit' && r.chat?.status !== 'paused').length
+  const zero = rows.filter((r) => r.count === 0 && r.chat?.status !== 'error' && r.chat?.status !== 'limit' && r.chat?.status !== 'paused').length
   const errors = rows.filter((r) => r.chat?.status === 'error').length
   const active = status?.active ?? 0
   const overall = percent(total, goal)
@@ -242,8 +244,8 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
     const list = [...rows]
     if (filter === 'done') return list.filter((r) => r.count >= DAILY_LIMIT)
     if (filter === 'limit') return list.filter((r) => r.chat?.status === 'limit')
-    if (filter === 'working') return list.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error' && r.chat?.status !== 'limit')
-    if (filter === 'zero') return list.filter((r) => r.count === 0 && r.chat?.status !== 'error' && r.chat?.status !== 'limit')
+    if (filter === 'working') return list.filter((r) => r.count > 0 && r.count < DAILY_LIMIT && r.chat?.status !== 'error' && r.chat?.status !== 'limit' && r.chat?.status !== 'paused')
+    if (filter === 'zero') return list.filter((r) => r.count === 0 && r.chat?.status !== 'error' && r.chat?.status !== 'limit' && r.chat?.status !== 'paused')
     if (filter === 'error') return list.filter((r) => r.chat?.status === 'error')
     return list
   }, [rows, filter]).sort((a, b) => (b.count - a.count) || a.account.phone.localeCompare(b.account.phone))
@@ -269,7 +271,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
             </h1>
             <p className="text-sm text-muted mt-3 leading-6">
               {done} account{done === 1 ? '' : 's'} finished 100 messages. {working} still working,
-              {' '}{limits} hit the bot limit, {zero} not started, and {errors} need a retry.
+              {' '}{limits} hit the bot limit, {paused} paused, {zero} not started, and {errors} need a retry.
             </p>
           </div>
           <div className="shrink-0 flex items-center gap-2 flex-wrap">
@@ -370,7 +372,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
             <div className="space-y-3 mt-4 text-[12px] leading-6 text-muted">
               <div><span className="font-mono text-ink">{done}</span> accounts are finished. Their daily counter is at least 100.</div>
               <div><span className="font-mono text-ink">{working}</span> accounts are still moving. <span className="font-mono text-ink">{active}</span> are running together now, with sends paced so Meow is not flooded.</div>
-              <div><span className="font-mono text-ink">{limits}</span> accounts hit the bot limit after 2 quiet replies and are skipped until reset. <span className="font-mono text-ink">{zero}</span> have not sent anything yet; <span className="font-mono text-ink">{errors}</span> have other errors.</div>
+              <div><span className="font-mono text-ink">{limits}</span> accounts got the bot's real limit message and are skipped until reset. <span className="font-mono text-ink">{paused}</span> had no reply and can be retried. <span className="font-mono text-ink">{zero}</span> have not sent anything yet; <span className="font-mono text-ink">{errors}</span> have other errors.</div>
               <div className="pt-2 border-t border-[color:var(--hairline)]">
                 Total today: <span className="font-mono text-ink">{total.toLocaleString()}</span> messages.
                 {' '}Still left: <span className="font-mono text-ink">{remaining.toLocaleString()}</span>.

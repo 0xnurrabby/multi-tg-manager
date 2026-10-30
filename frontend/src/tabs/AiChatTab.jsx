@@ -27,6 +27,7 @@ function statusMeta(chat) {
     reading:  { label: 'Reading reply', color: 'rgb(var(--accent-sky))' },
     queued:   { label: 'Queued', color: 'rgb(var(--accent-sky))' },
     cooldown: { label: 'Cooling down', color: 'rgb(var(--accent-peach))' },
+    paused:   { label: 'Paused', color: 'rgb(var(--accent-sun))' },
   }
   return map[chat.status] || { label: 'Live', color: 'rgb(var(--accent-mint))' }
 }

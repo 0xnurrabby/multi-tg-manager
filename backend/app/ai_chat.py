@@ -705,9 +705,7 @@ class AIChatManager:
                     if not got:
                         bot_timeouts += 1
                         if bot_timeouts >= 2:
-                            await self._mark_limit_reached(aid)
-                            limit_reached = True
-                            stop_note = "Daily limit reached. Skipping this account until the next reset."
+                            stop_note = "Meow did not reply. Paused for this run; retry later."
                             break
                         self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
                         await self._sleep_or_stop(stop, 15)
@@ -824,9 +822,7 @@ class AIChatManager:
                 else:
                     bot_timeouts += 1
                     if bot_timeouts >= 2:
-                        await self._mark_limit_reached(aid)
-                        limit_reached = True
-                        stop_note = "Daily limit reached. Skipping this account until the next reset."
+                        stop_note = "Meow did not reply. Paused for this run; retry later."
                         break
                     await self._sleep_or_stop(stop, 10)
 
@@ -836,7 +832,7 @@ class AIChatManager:
             elif limit_reached:
                 final_status = "limit"
             elif stop_note:
-                final_status = "error"
+                final_status = "paused"
             else:
                 final_status = "stopped"
             current_error = self._state.get(aid, {}).get("last_error") or ""
