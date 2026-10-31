@@ -3,6 +3,7 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 import asyncio
+import logging
 import tempfile
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from ..auth import verify_app_password
 from ..utils import friendly_error
 
 router = APIRouter(prefix="/api", tags=["accounts"])
+log = logging.getLogger("accounts")
 
 
 async def _account_to_out(acc: Account, db: AsyncSession) -> AccountOut:
@@ -38,6 +40,23 @@ async def _account_to_out(acc: Account, db: AsyncSession) -> AccountOut:
         is_online=acc.is_online,
         last_seen=acc.last_seen,
         unread_security=unread or 0,
+    )
+
+
+def _account_fallback(acc: Account) -> AccountOut:
+    return AccountOut(
+        id=acc.id,
+        phone=acc.phone,
+        tg_user_id=acc.tg_user_id,
+        first_name=acc.first_name,
+        last_name=acc.last_name,
+        username=acc.username,
+        bio=acc.bio,
+        status=acc.status,
+        has_2fa=acc.has_2fa,
+        is_online=acc.is_online,
+        last_seen=acc.last_seen,
+        unread_security=0,
     )
 
 
@@ -308,8 +327,19 @@ async def sign_in(body: SignInIn, db: AsyncSession = Depends(get_db)):
     if needs_2fa:
         return {"needs_2fa": True}
 
-    acc = await _persist_account(db, body.phone, me)
-    out = await _account_to_out(acc, db)
+    try:
+        acc = await _persist_account(db, body.phone, me)
+    except Exception as e:
+        log.exception("sign_in persist failed for %s", body.phone)
+        res = await db.execute(select(Account).where(Account.phone == body.phone))
+        acc = res.scalar_one_or_none()
+        if not acc:
+            raise HTTPException(400, f"sign_in failed: {e}")
+    try:
+        out = await _account_to_out(acc, db)
+    except Exception:
+        log.exception("sign_in response build failed for %s", body.phone)
+        out = _account_fallback(acc)
     return {"needs_2fa": False, "account": out.model_dump(mode="json")}
 
 
@@ -331,8 +361,19 @@ async def sign_in_2fa(body: SignInIn, db: AsyncSession = Depends(get_db)):
             raise HTTPException(400, "Wrong 2FA password")
         raise HTTPException(400, f"2FA failed: {e}")
 
-    acc = await _persist_account(db, body.phone, me)
-    out = await _account_to_out(acc, db)
+    try:
+        acc = await _persist_account(db, body.phone, me)
+    except Exception as e:
+        log.exception("sign_in_2fa persist failed for %s", body.phone)
+        res = await db.execute(select(Account).where(Account.phone == body.phone))
+        acc = res.scalar_one_or_none()
+        if not acc:
+            raise HTTPException(400, f"2FA failed: {e}")
+    try:
+        out = await _account_to_out(acc, db)
+    except Exception:
+        log.exception("sign_in_2fa response build failed for %s", body.phone)
+        out = _account_fallback(acc)
     return {"account": out.model_dump(mode="json")}
 
 
