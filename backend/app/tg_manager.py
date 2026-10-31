@@ -145,6 +145,10 @@ class TgClientManager:
         safe = re.sub(r"[^0-9]", "", phone)
         return str(settings.sessions_path / f"acc_{safe}")
 
+    def _login_session_path(self, phone: str) -> str:
+        safe = re.sub(r"[^0-9]", "", phone)
+        return str(settings.sessions_path / f"login_{safe}_{secrets.token_urlsafe(6)}")
+
     @staticmethod
     def _phone_file_part(phone: str) -> str:
         digits = re.sub(r"\D", "", phone or "")
@@ -272,7 +276,11 @@ class TgClientManager:
         if path.suffix.lower() != ".session":
             return False
         stem = path.stem.lower()
-        return not (stem.startswith("qr_") or stem.startswith("mtm_import_"))
+        return not (
+            stem.startswith("qr_")
+            or stem.startswith("mtm_import_")
+            or stem.startswith("login_")
+        )
 
     async def sync_session_folder(self, force: bool = False) -> dict:
         """Discover authorized .session files pasted into the sessions folder.
@@ -530,15 +538,55 @@ class TgClientManager:
         if prev:
             try: await prev['client'].disconnect()
             except Exception: pass
-        cli = TelegramClient(self._session_path(phone), settings.TG_API_ID, settings.TG_API_HASH)
-        await asyncio.wait_for(cli.connect(), timeout=20)
-        sent = await asyncio.wait_for(cli.send_code_request(phone), timeout=30)
-        self._pending[phone] = {
-            'client': cli,
-            'phone_code_hash': sent.phone_code_hash,
-            'needs_2fa': False,
-        }
-        return sent.phone_code_hash
+        last_error = None
+        for attempt in range(2):
+            login_path = self._login_session_path(phone)
+            cli = TelegramClient(
+                login_path, settings.TG_API_ID, settings.TG_API_HASH,
+                connection_retries=5, retry_delay=1, auto_reconnect=True,
+            )
+            try:
+                await asyncio.wait_for(cli.connect(), timeout=15)
+                if not cli.is_connected():
+                    await asyncio.wait_for(cli.connect(), timeout=15)
+                if not cli.is_connected():
+                    raise ConnectionError("Telegram connection was dropped")
+                sent = await asyncio.wait_for(cli.send_code_request(phone), timeout=20)
+                self._pending[phone] = {
+                    'client': cli,
+                    'phone_code_hash': sent.phone_code_hash,
+                    'needs_2fa': False,
+                    'session_path': login_path,
+                }
+                return sent.phone_code_hash
+            except (ConnectionError, OSError, asyncio.TimeoutError) as e:
+                last_error = e
+                try: await cli.disconnect()
+                except Exception: pass
+                self._remove_session_files(login_path)
+                if attempt == 0:
+                    await asyncio.sleep(2)
+                    continue
+                break
+            except Exception:
+                try: await cli.disconnect()
+                except Exception: pass
+                self._remove_session_files(login_path)
+                raise
+        raise RuntimeError(f"Telegram connection dropped while sending code: {last_error}")
+
+    async def _finish_pending_session(self, phone: str, pend: dict):
+        cli = pend.get('client')
+        src = pend.get('session_path')
+        if cli:
+            try: await cli.disconnect()
+            except Exception: pass
+        if src:
+            try:
+                self._move_session_files(src, self._session_path(phone))
+            except Exception as e:
+                log.warning("could not promote login session for %s: %s", phone, e)
+        self._pending.pop(phone, None)
 
     async def submit_code(self, phone: str, code: str) -> tuple[TgUser | None, bool]:
         """Returns (user, needs_2fa). If needs_2fa=True, user is None and the
@@ -561,8 +609,9 @@ class TgClientManager:
             await self._kill_pending(phone)
             raise
         me = await cli.get_me()
-        # Code accepted, no 2FA. Disconnect this temp client now that session is saved.
-        await self._kill_pending(phone, disconnect=True)
+        # Code accepted, no 2FA. Save the temp session under the phone's
+        # canonical name so promote_phone_session() can finish the job.
+        await self._finish_pending_session(phone, pend)
         return me, False
 
     async def submit_2fa(self, phone: str, password: str) -> TgUser:
@@ -581,7 +630,7 @@ class TgClientManager:
             await secrets_store.save_2fa(phone, password)
         except Exception:
             pass
-        await self._kill_pending(phone, disconnect=True)
+        await self._finish_pending_session(phone, pend)
         return me
 
     async def cancel_pending(self, phone: str):
@@ -592,6 +641,8 @@ class TgClientManager:
         if pend and disconnect:
             try: await pend['client'].disconnect()
             except Exception: pass
+        if pend and pend.get('session_path'):
+            self._remove_session_files(pend['session_path'])
 
     # ---------- QR login flow ----------
     # Telethon's `qr_login()` returns a QRLogin object. Its `url` field is a

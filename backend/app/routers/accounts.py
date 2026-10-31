@@ -126,8 +126,12 @@ async def stats(db: AsyncSession = Depends(get_db)):
 # ----- Auth -----
 @router.post("/auth/send_code")
 async def send_code(body: SendCodeIn):
+    async with AsyncSessionLocal() as db:
+        exists = await db.scalar(select(Account).where(Account.phone == body.phone))
+        if exists:
+            raise HTTPException(400, "This phone is already added. Remove the old account first.")
     try:
-        await asyncio.wait_for(manager.send_code(body.phone), timeout=45)
+        await asyncio.wait_for(manager.send_code(body.phone), timeout=90)
     except asyncio.TimeoutError:
         raise HTTPException(504, "Telegram took too long to respond. Try again.")
     except Exception as e:

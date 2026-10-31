@@ -203,14 +203,7 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
         </div>
       )}
 
-      <div className="px-5 py-4 border-t border-[color:var(--hairline)] shrink-0 space-y-2">
-        <button
-          className="nb-btn-err w-full"
-          disabled={totalAccounts === 0 || removeAllBusy}
-          onClick={() => setConfirmRemoveAll(true)}
-        >
-          Remove all accounts
-        </button>
+      <div className="px-5 py-4 border-t border-[color:var(--hairline)] shrink-0">
         <button className="nb-btn-pri w-full" onClick={onAdd}>
           <Icon name="plus" size={16} />
           Add account

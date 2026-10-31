@@ -42,7 +42,7 @@ export default function AddAccountModal({ onClose, onAdded, onImported }) {
       toast.error('Enter phone with country code, e.g. +8801712345678')
       return
     }
-    setBusy(true); setHint('Sending code via Telegram... up to 30 seconds')
+    setBusy(true); setHint('Sending code via Telegram... retrying if the connection drops')
     try {
       await Endpoints.sendCode(phone)
       toast.info('Code sent. Check Telegram.')
