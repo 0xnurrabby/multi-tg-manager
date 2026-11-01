@@ -300,6 +300,21 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
     skipped: list[int] = []
     errors: list[dict] = []
     counts: dict[int, int] = {}
+
+    # The DB can still say "connected" after a session failed to load at boot.
+    # Reconnect those missing clients before counting or starting.
+    missing = [a for a in accounts if not manager.get(a.id)]
+    if missing:
+        reconnect_sem = asyncio.Semaphore(6)
+
+        async def reconnect(acc):
+            async with reconnect_sem:
+                try:
+                    await manager.start_client(acc)
+                except Exception:
+                    pass
+
+        await asyncio.gather(*(reconnect(a) for a in missing), return_exceptions=True)
     blocked: set[int] = set()
     if body.fill_daily:
         counts, count_errors = await _daily_counts(accounts, target)

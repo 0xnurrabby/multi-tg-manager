@@ -710,6 +710,7 @@ class AIChatManager:
 
             consecutive_errors = 0
             bot_timeouts = 0
+            no_reply_retries = 0
             limit_reached = False
             stop_note = ""
             while not stop.is_set():
@@ -736,12 +737,27 @@ class AIChatManager:
                     if not got:
                         bot_timeouts += 1
                         if bot_timeouts >= 2:
-                            stop_note = "Meow did not reply. Paused for this run; retry later."
+                            if no_reply_retries < 4:
+                                no_reply_retries += 1
+                                self._set(
+                                    aid, status="cooldown",
+                                    last_error="Meow did not reply. Retrying automatically.",
+                                    last_activity=_now_iso(),
+                                )
+                                await self._sleep_or_stop(stop, random.uniform(45, 75))
+                                if stop.is_set():
+                                    break
+                                bot_timeouts = 0
+                                force_first = True
+                                next_send_at = loop.time() + random.uniform(5, 15)
+                                continue
+                            stop_note = "Meow did not reply after retries. Paused for this run."
                             break
                         self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
                         await self._sleep_or_stop(stop, 15)
                         continue
                     bot_timeouts = 0
+                    no_reply_retries = 0
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
                     if not last:
@@ -849,11 +865,26 @@ class AIChatManager:
                     break
                 if got:
                     bot_timeouts = 0
+                    no_reply_retries = 0
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
                     bot_timeouts += 1
                     if bot_timeouts >= 2:
-                        stop_note = "Meow did not reply. Paused for this run; retry later."
+                        if no_reply_retries < 4:
+                            no_reply_retries += 1
+                            self._set(
+                                aid, status="cooldown",
+                                last_error="Meow did not reply. Retrying automatically.",
+                                last_activity=_now_iso(),
+                            )
+                            await self._sleep_or_stop(stop, random.uniform(45, 75))
+                            if stop.is_set():
+                                break
+                            bot_timeouts = 0
+                            force_first = True
+                            next_send_at = loop.time() + random.uniform(5, 15)
+                            continue
+                        stop_note = "Meow did not reply after retries. Paused for this run."
                         break
                     await self._sleep_or_stop(stop, 10)
 
@@ -882,7 +913,7 @@ class AIChatManager:
     async def _send_paced(self, cli, entity, text: str, reply_to=None):
         loop = asyncio.get_running_loop()
         async with self._send_lock:
-            wait = self._last_send_at + 0.32 - loop.time()
+            wait = self._last_send_at + 0.5 - loop.time()
             if wait > 0:
                 await asyncio.sleep(wait)
             sent = await cli.send_message(entity, text, reply_to=reply_to)
