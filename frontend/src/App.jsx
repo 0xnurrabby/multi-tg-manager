@@ -6,6 +6,7 @@ import { ensureNotificationPermission, desktopNotify } from './lib/util'
 import LoginScreen from './components/LoginScreen.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import TopStats from './components/TopStats.jsx'
+import TunnelLink from './components/TunnelLink.jsx'
 import AddAccountModal from './components/AddAccountModal.jsx'
 import AccountPage from './components/AccountPage.jsx'
 import Icon from './components/Icon.jsx'
@@ -209,6 +210,10 @@ export default function App() {
 
           <div className="hidden md:flex">
             <TopStats stats={stats} onBellClick={() => { setFocusAlert(null); closeAccountRoute(); setTab('security') }} />
+          </div>
+
+          <div className="hidden lg:flex min-w-0">
+            <TunnelLink />
           </div>
 
           <div className="flex items-center gap-2">

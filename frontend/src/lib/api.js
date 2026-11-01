@@ -109,6 +109,7 @@ export function streamNDJSONForm(path, form, onEvent) {
 // Convenience endpoints
 export const Endpoints = {
   health: () => api.get('/api/health'),
+  tunnel: () => api.get('/api/tunnel'),
   stats: () => api.get('/api/stats'),
   accounts: () => api.get('/api/accounts'),
   account: (id) => api.get(`/api/accounts/${id}`),

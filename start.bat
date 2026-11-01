@@ -107,7 +107,8 @@ if not exist "!ROOT!\backend\static\index.html" (
 echo.
 echo ============================================
 echo   Server: http://localhost:8000
-echo   Close this window to stop.
+echo   Cloudflare: public link will appear in the dashboard header.
+echo   Close this window to stop the server and tunnel.
 echo ============================================
 echo.
 

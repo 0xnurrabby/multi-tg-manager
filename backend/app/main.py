@@ -12,6 +12,7 @@ from .config import settings
 from .db import init_db
 from .tg_manager import manager
 from .ai_chat import ai_manager
+from .tunnel import tunnel_manager
 from .auth import router as auth_router, require_auth
 from .routers import accounts, profile, security, groups, messaging, settings as settings_router, bulk, ai as ai_router
 
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     manager.set_loop(asyncio.get_event_loop())
     await manager.startup_load_all()
+    await tunnel_manager.start()
 
     async def status_loop():
         while True:
@@ -42,6 +44,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         task.cancel()
+        await tunnel_manager.stop()
         await ai_manager.shutdown()
         await manager.shutdown()
 
@@ -63,6 +66,11 @@ app.include_router(auth_router)
 @app.get("/api/health")
 async def health():
     return {"ok": True, "api_id_set": bool(settings.TG_API_ID), "clients": len(manager._clients)}
+
+
+@app.get("/api/tunnel", dependencies=[Depends(require_auth)])
+async def tunnel_info():
+    return tunnel_manager.snapshot()
 
 
 # all data routers require auth
