@@ -381,10 +381,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   }
 
   async function checkDaily() {
-    const ids = (selected.length
-      ? selected
-      : accounts.filter((a) => a.status === 'connected').map((a) => a.id))
-      .filter((id) => accounts.some((a) => a.id === id && a.status === 'connected'))
+    const ids = accounts
+      .filter((a) => a.status === 'connected')
+      .map((a) => a.id)
     if (ids.length === 0) {
       toast.error('No connected accounts to check')
       return
@@ -392,7 +391,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     setCheckingDaily(true)
     try {
       const r = await Endpoints.aiDailyCounts(ids)
-      setDailyCounts((prev) => ({ ...prev, ...(r.counts || {}) }))
+      setDailyCounts(r.counts || {})
       if (r.daily_limit) setDailyLimit(r.daily_limit)
       const values = Object.values(r.counts || {})
       const total = values.reduce((sum, n) => sum + Number(n || 0), 0)
@@ -682,7 +681,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <div className="text-[10px] text-muted mt-2">
             Fill 100 counts each account's outgoing messages to the bot today, then sends only the rest.
             With no selection it fills all connected accounts. Counts reset every day at 6:00 AM Bangladesh.
-            Check today also checks all connected accounts when nothing is selected.
+            Check today reads the real message count from all connected accounts.
           </div>
           {!settings?.has_key && (
             <div className="nb-note nb-note-warn px-3 py-2 text-[11px] mt-3">

@@ -687,7 +687,9 @@ class AIChatManager:
                     force_first = True
                     next_send_at = loop.time() + random.uniform(2, 6)
                 else:
-                    sent = await self._send_paced(cli, entity, "/start")
+                    sent = await self._send_paced(cli, entity, "/start", stop=stop)
+                    if sent is None:
+                        return
                     await self._persist(aid, "me", "/start", sent.id)
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     next_send_at = loop.time() + random.uniform(10, 25)
@@ -845,16 +847,18 @@ class AIChatManager:
                 quote = bool(last and last.direction == "bot" and last.tg_msg_id and random.random() < 0.34)
                 reply_to = last.tg_msg_id if quote else None
                 try:
-                    sent = await self._send_paced(cli, entity, reply, reply_to=reply_to)
+                    sent = await self._send_paced(cli, entity, reply, reply_to=reply_to, stop=stop)
                 except Exception:
                     # The quoted message may have been deleted; send plain text.
                     quote = False
-                    sent = await self._send_paced(cli, entity, reply)
+                    sent = await self._send_paced(cli, entity, reply, stop=stop)
+                if sent is None:
+                    break
                 await self._persist(aid, "me", reply, sent.id,
                                     reply_to_text=last.text if quote and last else None)
                 turns_done += 1
                 daily_sent += 1
-                next_send_at = loop.time() + random.uniform(8, 22)
+                next_send_at = loop.time() + random.uniform(12, 30)
                 self._set(
                     aid, turns_done=turns_done, daily_sent=daily_sent,
                     status="waiting", last_activity=_now_iso(),
@@ -910,12 +914,16 @@ class AIChatManager:
             log.warning("ai chat %s stopped: %s", aid, e)
             self._set(aid, running=False, status="error", last_error=str(e)[:300], last_activity=_now_iso())
 
-    async def _send_paced(self, cli, entity, text: str, reply_to=None):
+    async def _send_paced(self, cli, entity, text: str, reply_to=None, stop=None):
         loop = asyncio.get_running_loop()
         async with self._send_lock:
+            if stop is not None and stop.is_set():
+                return None
             wait = self._last_send_at + 0.2 - loop.time()
             if wait > 0:
                 await asyncio.sleep(wait)
+            if stop is not None and stop.is_set():
+                return None
             sent = await cli.send_message(entity, text, reply_to=reply_to)
             self._last_send_at = loop.time()
             return sent
