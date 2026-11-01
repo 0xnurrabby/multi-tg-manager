@@ -148,6 +148,8 @@ export const Endpoints = {
 
   // bulk profile/photo stream live progress (NDJSON), same as the other bulk tasks
   bulkProfile: (payload, onEvent) => streamNDJSON('/api/bulk/profile', payload, onEvent),
+  aiProfileEstimate: (accountIds) => api.post('/api/bulk/ai_profiles/estimate', { account_ids: accountIds }),
+  bulkAiProfiles: (accountIds, onEvent) => streamNDJSON('/api/bulk/ai_profiles', { account_ids: accountIds }, onEvent),
   bulkPhoto: (ids, files, onEvent) => {
     const fd = new FormData()
     fd.append('account_ids', ids.join(','))

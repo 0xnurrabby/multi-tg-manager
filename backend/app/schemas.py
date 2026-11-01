@@ -101,6 +101,10 @@ class BulkProfileIn(BaseModel):
     per_account: Optional[dict[str, dict[str, Optional[str]]]] = None
 
 
+class BulkAiProfileIn(BaseModel):
+    account_ids: list[int]
+
+
 class BulkPhotoIn(BaseModel):
     account_ids: list[int]
     # image is uploaded separately as multipart

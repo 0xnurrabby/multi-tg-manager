@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import ProgressModal from '../components/ProgressModal.jsx'
@@ -42,10 +42,49 @@ export default function BulkTab({ accounts, onDone }) {
   const [photos, setPhotos] = useState([])    // File[]
   const photoRef = useRef(null)
   const [busy, setBusy] = useState(false)
+  const [aiEstimate, setAiEstimate] = useState(null)
 
   const allChecked = ids.length === accounts.length && accounts.length > 0
   const toggleAll = () => setIds(allChecked ? [] : accounts.map((a) => a.id))
   const toggle = (id) => setIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
+
+  const missingNameIds = useMemo(
+    () => accounts.filter((a) => !`${a.first_name || ''}${a.last_name || ''}`.trim()).map((a) => a.id),
+    [accounts],
+  )
+  const missingUsernameIds = useMemo(
+    () => accounts.filter((a) => !(a.username || '').trim()).map((a) => a.id),
+    [accounts],
+  )
+
+  useEffect(() => {
+    let alive = true
+    const t = setTimeout(() => {
+      Endpoints.aiProfileEstimate(ids)
+        .then((r) => { if (alive) setAiEstimate(r) })
+        .catch(() => { if (alive) setAiEstimate(null) })
+    }, 250)
+    return () => { alive = false; clearTimeout(t) }
+  }, [ids])
+
+  async function aiChangeProfiles() {
+    if (!ids.length) { toast.error('Select accounts first'); return }
+    if (!aiEstimate?.has_key) {
+      toast.error('Add your AI Gateway key in AI Chat first')
+      return
+    }
+    const cost = Number(aiEstimate.estimated_cost_usd || 0)
+    if (!confirm(
+      `AI change name + username on ${ids.length} account(s)?\n\n` +
+      `Estimated AI cost: ~$${cost.toFixed(4)}\n` +
+      `Usernames are checked and retried up to 5 times per account.`
+    )) return
+    setBusy(true)
+    await run(`AI profile change (${ids.length} accounts)`, (onEvent) =>
+      Endpoints.bulkAiProfiles(ids, onEvent))
+    setBusy(false)
+    onDone?.()
+  }
 
   // ----- CSV -----
   function loadCsv(e) {
@@ -136,6 +175,68 @@ export default function BulkTab({ accounts, onDone }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <div className="lg:col-span-2 space-y-4">
+        <div
+          className="nb-card p-5 overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, rgb(var(--accent-mint) / 0.42), rgb(var(--surface)) 55%, rgb(var(--accent-sky) / 0.28))' }}
+        >
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div className="micro-label">AI profile studio</div>
+              <h3 className="display-title text-[22px] mt-1">Name + username, automatically</h3>
+              <p className="text-[12px] text-muted mt-2 max-w-[62ch] leading-5">
+                Random-country human names, posh name-based usernames, Telegram availability
+                checks, and up to 5 username tries per account. Uses the AI Chat model and key.
+              </p>
+            </div>
+            <span className={'nb-badge ' + (aiEstimate?.has_key ? 'bg-brand-ok text-black' : 'bg-brand-warn text-black')}>
+              {aiEstimate?.has_key ? 'AI key ready' : 'No AI key'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
+            <div className="rounded-[12px] p-3" style={{ background: 'rgb(var(--surface) / 0.72)', border: '1px solid var(--hairline)' }}>
+              <div className="micro-label">Selected</div>
+              <div className="display-title text-[22px] mt-1 tabular-nums">{ids.length}</div>
+            </div>
+            <div className="rounded-[12px] p-3" style={{ background: 'rgb(var(--surface) / 0.72)', border: '1px solid var(--hairline)' }}>
+              <div className="micro-label">Estimate</div>
+              <div className="display-title text-[22px] mt-1 tabular-nums">
+                ~${Number(aiEstimate?.estimated_cost_usd || 0).toFixed(4)}
+              </div>
+              <div className="text-[9px] text-muted font-mono">${Number(aiEstimate?.per_account_usd || 0).toFixed(5)}/account</div>
+            </div>
+            <div className="rounded-[12px] p-3" style={{ background: 'rgb(var(--surface) / 0.72)', border: '1px solid var(--hairline)' }}>
+              <div className="micro-label">Username tries</div>
+              <div className="display-title text-[22px] mt-1">5</div>
+              <div className="text-[9px] text-muted">per account max</div>
+            </div>
+            <div className="rounded-[12px] p-3 min-w-0" style={{ background: 'rgb(var(--surface) / 0.72)', border: '1px solid var(--hairline)' }}>
+              <div className="micro-label">Model</div>
+              <div className="font-mono text-[11px] mt-2 truncate" title={aiEstimate?.model || ''}>
+                {(aiEstimate?.model || 'AI Chat model').split('/').pop()}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 mt-4 flex-wrap">
+            <button
+              className="nb-btn-pri"
+              onClick={aiChangeProfiles}
+              disabled={busy || ids.length === 0 || !aiEstimate?.has_key}
+            >
+              AI change ({ids.length})
+            </button>
+            <span className="text-[10px] text-muted">
+              Estimate updates with selection. Telegram username changes are capped at 5 attempts per account.
+            </span>
+          </div>
+          {!aiEstimate?.has_key && (
+            <div className="nb-note nb-note-warn px-3 py-2 text-[11px] mt-3">
+              Add the Vercel AI Gateway key in AI Chat to enable AI changes.
+            </div>
+          )}
+        </div>
+
         <div className="nb-card p-4">
           <h3 className="display-title text-[20px] mb-3">Bulk profile edit</h3>
 
@@ -251,8 +352,26 @@ export default function BulkTab({ accounts, onDone }) {
           <input type="checkbox" checked={allChecked} onChange={toggleAll} />
           <span className="font-bold text-sm">Select all ({accounts.length})</span>
         </label>
+        <div className="grid grid-cols-1 gap-1.5 mb-3">
+          <button
+            className="nb-btn !justify-between !py-1.5 !px-2.5 !text-[10px]"
+            onClick={() => setIds(missingNameIds)}
+            disabled={missingNameIds.length === 0}
+          >
+            <span>Select missing name</span>
+            <span className="font-mono">{missingNameIds.length}</span>
+          </button>
+          <button
+            className="nb-btn !justify-between !py-1.5 !px-2.5 !text-[10px]"
+            onClick={() => setIds(missingUsernameIds)}
+            disabled={missingUsernameIds.length === 0}
+          >
+            <span>Select missing username</span>
+            <span className="font-mono">{missingUsernameIds.length}</span>
+          </button>
+        </div>
         <div className="text-[10px] text-muted mb-2">
-          Order matters: row N of CSV / photo #N → account #N (top to bottom of this list).
+          Order matters: row N of CSV / photo #N maps to account #N (top to bottom of this list).
         </div>
         <div className="space-y-1 max-h-[60vh] overflow-auto">
           {accounts.map((a, i) => (
