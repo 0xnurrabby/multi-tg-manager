@@ -406,7 +406,7 @@ class AIChatManager:
         self._state: dict[int, dict] = {}
         # AI calls are cheap but not free; this only limits simultaneous Gateway
         # calls. Every account still has its own task, profile and conversation.
-        self._ai_sem = asyncio.Semaphore(10)
+        self._ai_sem = asyncio.Semaphore(15)
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
         # Every account runs together, but messages leave at a steady pace so
@@ -913,7 +913,7 @@ class AIChatManager:
     async def _send_paced(self, cli, entity, text: str, reply_to=None):
         loop = asyncio.get_running_loop()
         async with self._send_lock:
-            wait = self._last_send_at + 0.5 - loop.time()
+            wait = self._last_send_at + 0.2 - loop.time()
             if wait > 0:
                 await asyncio.sleep(wait)
             sent = await cli.send_message(entity, text, reply_to=reply_to)

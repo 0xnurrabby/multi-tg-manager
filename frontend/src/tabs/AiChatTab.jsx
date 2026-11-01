@@ -493,6 +493,12 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const chatIds = new Set(allChats.map((c) => c.account_id))
   const runningCount = status?.running || 0
   const activeCount = status?.active ?? runningCount
+  const talkingCount = allChats.filter(
+    (c) => c.running && ['reading', 'typing', 'thinking'].includes(c.status)
+  ).length
+  const waitingCount = allChats.filter(
+    (c) => c.running && c.status === 'waiting'
+  ).length
   const dailyValues = Object.values(dailyCounts).map((n) => Number(n) || 0)
   const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
   const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
@@ -755,7 +761,10 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <h2 className="display-title text-[20px] mt-1">Live chats</h2>
           <div className="flex items-baseline gap-2 mt-4">
             <span className="display-title text-[38px] tabular-nums">{activeCount}</span>
-            <span className="text-xs text-muted">active</span>
+            <span className="text-xs text-muted">running tasks</span>
+          </div>
+          <div className="text-[10px] text-muted mt-1 font-mono">
+            {talkingCount} talking now · {waitingCount} waiting for reply
           </div>
           <div className="h-px bg-[color:var(--hairline)] my-4" />
           <div className="space-y-2 text-[12px] text-muted">
