@@ -29,8 +29,9 @@ function ago(iso) {
 
 const goneName = (g) => `${g.first_name || ''} ${g.last_name || ''}`.trim() || g.phone
 
-export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onAdd, onDeleted, onGoneChange }) {
+export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onAdd, onClose, onDeleted, onGoneChange }) {
   const toast = useToast()
+  const [query, setQuery] = useState('')
   const [pendingDelete, setPendingDelete] = useState(null)  // account pending removal
   const [confirmRemoveAll, setConfirmRemoveAll] = useState(false)
   const [passwordRemoveAll, setPasswordRemoveAll] = useState(false)
@@ -42,6 +43,10 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
   // Serial numbers are the 1-based position in this active list.
   const active = accounts.filter((a) => a.status !== 'banned')
   const totalAccounts = accounts.length
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? active.filter((a) => `${a.first_name} ${a.last_name} ${a.username} ${a.phone}`.toLowerCase().includes(q))
+    : active
 
   async function confirmDelete() {
     const a = pendingDelete
@@ -97,12 +102,25 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
 
   return (
     <aside className="app-sidebar w-[300px] xl:w-[320px] shrink-0 flex flex-col">
-      <div className="px-5 py-4 border-b border-[color:var(--hairline)] flex items-end justify-between">
+      <div className="px-5 py-4 border-b border-[color:var(--hairline)] flex items-end justify-between gap-2">
         <div>
           <div className="micro-label">Directory</div>
           <div className="display-title text-[22px] mt-1">Accounts</div>
         </div>
-        <span className="nb-badge bg-brand-pri">{active.length}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="nb-badge bg-brand-pri">{active.length}</span>
+          <button className="icon-btn lg:hidden" onClick={onClose} aria-label="Close accounts">
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+      </div>
+      <div className="px-4 py-2.5 border-b border-[color:var(--hairline)]">
+        <input
+          className="nb-input !py-1.5 !text-xs"
+          placeholder="Search name, @username or phone"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
       </div>
       <div className="flex-1 overflow-auto">
         {active.length === 0 && (
@@ -112,7 +130,13 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
             <div className="text-sm max-w-[28ch]">Add your first Telegram account to begin.</div>
           </div>
         )}
-        {active.map((a, i) => {
+        {active.length > 0 && filtered.length === 0 && (
+          <div className="empty-state" style={{ padding: '28px 16px' }}>
+            <div className="empty-title">No matching accounts</div>
+            <div className="text-sm">Try another name, username or phone.</div>
+          </div>
+        )}
+        {filtered.map((a, i) => {
           const sel = a.id === selectedId
           const serial = i + 1
           return (

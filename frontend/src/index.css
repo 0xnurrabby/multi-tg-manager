@@ -344,6 +344,30 @@ html.dark {
   border-right: 1px solid var(--hairline);
 }
 
+.sidebar-scrim { display: none; }
+
+@media (max-width: 1023px) {
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgb(var(--ink) / 0.38);
+    backdrop-filter: blur(2px);
+  }
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: min(88vw, 360px);
+    height: 100dvh;
+    border-right: 1px solid var(--hairline-strong);
+    box-shadow: 18px 0 50px -30px rgba(15, 20, 25, 0.8);
+  }
+}
+
 .account-row {
   border-bottom: 1px solid var(--hairline);
   cursor: pointer;

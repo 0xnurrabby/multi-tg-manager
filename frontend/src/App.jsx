@@ -139,6 +139,9 @@ export default function App() {
     setSelectedId(id)
     setSelectTick((n) => n + 1)
     setFocusAlert(null)
+    // On phones the directory is a drawer; selecting an account should reveal
+    // the full page instead of leaving the list over it.
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false)
     // Dashboard clicks open the full account page. Inside a tool tab (AI Chat,
     // Groups, Messages, etc.) selection should stay in that tool.
     if (acc?.phone && (routePhone || tab === 'dashboard')) {
@@ -167,7 +170,8 @@ export default function App() {
     refreshStats()
     refreshGone()
     const id = setInterval(() => { refreshAccounts(); refreshStats(); refreshGone() }, 30000)
-    return () => clearInterval(id)
+    const live = setInterval(refreshStats, 5000)
+    return () => { clearInterval(id); clearInterval(live) }
   }, [authState, refreshAccounts, refreshStats, refreshGone])
 
   if (authState === 'checking') {
@@ -229,15 +233,19 @@ export default function App() {
 
       <div className="flex-1 flex min-h-0">
         {sidebarOpen && (
-          <Sidebar
-            accounts={accounts}
-            gone={gone}
-            selectedId={selectedId}
-            onSelect={openAccount}
-            onAdd={() => setAddOpen(true)}
-            onDeleted={() => { refreshAccounts(); refreshGone() }}
-            onGoneChange={refreshGone}
-          />
+          <>
+            <div className="sidebar-scrim lg:hidden" onClick={() => setSidebarOpen(false)} aria-hidden="true" />
+            <Sidebar
+              accounts={accounts}
+              gone={gone}
+              selectedId={selectedId}
+              onSelect={openAccount}
+              onAdd={() => setAddOpen(true)}
+              onClose={() => setSidebarOpen(false)}
+              onDeleted={() => { refreshAccounts(); refreshGone() }}
+              onGoneChange={refreshGone}
+            />
+          </>
         )}
 
         <main className="flex-1 min-w-0 flex flex-col">

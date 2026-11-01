@@ -44,12 +44,12 @@ export default function AccountPage({ account, onRefresh, onOpenTab }) {
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
-        <div className="min-w-0">
+        <div className="min-w-0 order-2 xl:order-1">
           <div className="micro-label mb-2">Profile</div>
           <ProfileTab account={account} onRefresh={onRefresh} showChat={false} />
         </div>
 
-        <div className="min-w-0">
+        <div className="min-w-0 order-1 xl:order-2">
           <div className="micro-label mb-2">Security</div>
           <AccountRow
             key={account.id}

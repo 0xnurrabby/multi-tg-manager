@@ -31,25 +31,48 @@ export function AccountRow({ account, focus, isSelected, focusTick, focused = fa
   const [loading, setLoading] = useState(false)
   const [highlightId, setHighlightId] = useState(null)
   const cardRef = useRef(null)
+  const lastMaxRef = useRef(0)
+  const onChangeRef = useRef(onChange)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  const loadMessages = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const m = await Endpoints.securityMessages(account.id)
       setMsgs(m)
+      const maxId = (m || []).reduce((mx, row) => Math.max(mx, row.id || 0), 0)
+      if (lastMaxRef.current && maxId > lastMaxRef.current) onChangeRef.current?.()
+      lastMaxRef.current = maxId
     } catch (e) {
-      toast.error(e.message)
+      if (!silent) toast.error(e.message)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
+  }, [account.id, toast])
+
+  const loadSessions = useCallback(() => {
     // Sessions come from Telegram and can take a moment; don't hold the
     // message list hostage while they load.
     Endpoints.tgSessions(account.id)
       .then((s) => setSessions(s || []))
       .catch(() => setSessions([]))
-  }, [account.id, toast])
+  }, [account.id])
 
-  useEffect(() => { if (open) load() }, [open, load])
+  const load = useCallback(async () => {
+    await loadMessages(false)
+    loadSessions()
+  }, [loadMessages, loadSessions])
+
+  useEffect(() => {
+    if (!open) return
+    loadMessages(false)
+    loadSessions()
+    const id = setInterval(() => {
+      if (!document.hidden) loadMessages(true)
+    }, 2500)
+    return () => clearInterval(id)
+  }, [open, loadMessages, loadSessions])
 
   // Arriving from a dashboard alert: open this account and mark the message.
   useEffect(() => {
