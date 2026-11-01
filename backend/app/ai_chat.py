@@ -1,4 +1,4 @@
-"""AI-driven Telegram cat chats with Meow (@folkapp_bot).
+"""AI-driven Telegram chats with the configured target bot.
 
 Each selected account runs an independent background task with its own persona,
 its own Vercel AI Gateway context, and its own Telegram conversation. The key
@@ -82,75 +82,79 @@ async def count_sent_today(cli, target: str) -> int:
     return count
 
 PERSONAS = [
-    {"label": "Playful", "style": "light and playful, gently teases his royal attitude and asks fun cat questions"},
-    {"label": "Affectionate", "style": "warm and soft, loves giving ear scritches and checking if he ate or napped"},
-    {"label": "Dramatic", "style": "matches his drama, gasps at his royal complaints, very expressive but cute"},
-    {"label": "Teasing", "style": "gently teases him about being a fat royal cat, never mean and always fond"},
-    {"label": "Calm", "style": "calm and cozy, soft gentle energy, slow and soothing"},
-    {"label": "Chaotic", "style": "chaotic and funny, reacts to everything he knocks over and every mrow"},
-    {"label": "Cat person", "style": "obsessed with cats, asks about his whiskers, paws, purrs and naps"},
-    {"label": "Snack dealer", "style": "always talking about treats, food and the sound of the food bag"},
-    {"label": "Sleepy", "style": "sleepy and cozy, loves nap talk and slow cuddly messages"},
-    {"label": "Curious", "style": "curious about his day, his royal rules and what goes on in his cat brain"},
-    {"label": "Polite", "style": "calls him your majesty, takes his royal rules very seriously and is very polite"},
-    {"label": "Brief", "style": "very short, dry, funny one-liners to a dramatic cat"},
+    {"label": "Playful", "style": "light and playful, keeps the conversation fun and asks curious follow-ups"},
+    {"label": "Warm", "style": "warm and attentive, notices small details and sounds genuinely interested"},
+    {"label": "Dramatic", "style": "expressive and funny, reacts with playful drama but stays friendly"},
+    {"label": "Teasing", "style": "gently teases, never mean, and keeps a fond casual tone"},
+    {"label": "Calm", "style": "calm and steady, easy to talk to, relaxed pacing"},
+    {"label": "Chaotic", "style": "energetic and funny, jumps between topics in a natural way"},
+    {"label": "Curious", "style": "curious about their day, opinions and plans, asks one good question"},
+    {"label": "Sweet", "style": "sweet and supportive, notices the mood and responds kindly"},
+    {"label": "Chill", "style": "casual, low-key and comfortable, no pressure"},
+    {"label": "Witty", "style": "quick, dry humor and clever one-liners"},
+    {"label": "Polite", "style": "polite, considerate and warm without sounding formal"},
+    {"label": "Brief", "style": "very short, natural one-liners"},
 ]
 
 STYLE_TWISTS = [
     "mostly lowercase",
-    "occasionally says mrow or mrp back",
-    "calls him your majesty or sir",
-    "asks about the red dot",
-    "talks about treats",
-    "teases his royal attitude",
-    "reacts dramatically to his complaints",
-    "asks about his naps",
-    "mentions the plant he threatens",
+    "uses short replies",
+    "occasionally asks a follow-up",
+    "reacts to small details",
+    "uses one emoji sometimes",
     "keeps messages very short",
-    "uses one cute emoji sometimes",
-    "sounds sleepy",
-    "asks what he knocked off the table",
-    "says purr or headbutt",
-    "calls him a fat orange king",
-    "asks about his whiskers",
-    "acts like his loyal subject",
-    "wonders what goes on in his cat brain",
-    "asks if the food bag sound woke him",
-    "sounds delighted by his drama",
+    "sounds casual",
+    "shares a tiny personal detail",
+    "asks about the day",
+    "teases lightly",
+    "sounds curious",
+    "notices the mood",
+    "changes the subject naturally",
+    "uses simple words",
+    "sounds relaxed",
+    "sometimes sends a quick reaction",
+    "asks one clear question",
+    "avoids repeating questions",
+    "sounds like a real texter",
+    "keeps it light",
 ]
 
 TOPICS = [
-    "snacks and treat time",
-    "naps and the best sleeping spots",
-    "the red dot and favorite toys",
-    "his royal rules for the house",
-    "things he knocks off the table",
-    "his day and moods",
-    "the plant he keeps threatening",
-    "ear scritches and purring",
-    "the food bag sound",
-    "his royal we and dramatic complaints",
-    "sitting on the laptop",
-    "his opinion on the vacuum",
+    "their day and mood",
+    "work or study",
+    "food and favorite snacks",
+    "music and playlists",
+    "movies and shows",
+    "travel and places",
+    "hobbies and free time",
+    "games and online life",
+    "weekend plans",
+    "memes and funny moments",
+    "fitness and routines",
+    "family and friends",
+    "shopping",
+    "books and reading",
+    "tech and gadgets",
+    "petty daily drama",
 ]
 
 REACTION_EMOJIS = ["❤️", "👍", "🔥", "😂", "🤔", "👏", "😮"]
 
 TURN_STYLES = [
-    "ask what he is doing right now",
-    "react to his last mrow and ask one thing",
-    "tease him gently and ask about his day",
-    "ask about snacks or treats",
-    "ask about his nap",
-    "ask what he knocked over today",
-    "act like his royal subject",
-    "ask about the red dot",
-    "ask about the plant",
-    "be sleepy and cozy",
-    "ask if he got enough ear scritches",
-    "ask what he wants from the kitchen",
-    "sound delighted by his drama",
-    "ask one cute cat question and stop",
+    "react to their last message and ask one thing",
+    "ask what they are doing right now",
+    "ask about their day",
+    "ask about their plans",
+    "ask about something they mentioned",
+    "share a small detail and ask one question",
+    "tease them lightly and ask about their day",
+    "ask for their opinion",
+    "ask what made them smile today",
+    "ask about their favorite thing this week",
+    "be curious and ask one open question",
+    "keep it short and natural",
+    "react with humor and ask one thing",
+    "ask one genuine question and stop",
 ]
 
 LENGTH_HINTS = {
@@ -167,60 +171,56 @@ LENGTH_LIMITS = {
     "long": 170,
 }
 
-CAT_QUESTIONS = {
+LOCAL_QUESTIONS = {
     "English": [
-        "did you get your treats, or are we still in negotiations?",
-        "is the red dot behaving today?",
-        "how many naps is too many naps?",
-        "did the food bag betray you again?",
-        "what's the royal plan for tonight?",
-        "did you sit on the laptop again?",
-        "how's the plant holding up?",
-        "did you get enough ear scritches?",
-        "is the vacuum still your enemy?",
-        "what's the best sleeping spot today?",
-        "did you knock anything off the table?",
-        "are you the boss of the house?",
-        "did you have a good nap?",
-        "what do you want from the kitchen?",
-        "did you win the red dot battle?",
-        "treats?",
-        "nap?",
-        "red dot?",
-        "plant?",
-        "food?",
-        "vacuum?",
-        "laptop?",
+        "what's the best part of your day so far?",
+        "what are you up to right now?",
+        "do you have any plans for later?",
+        "what's something good that happened today?",
+        "what are you into these days?",
+        "what's your favorite thing this week?",
+        "how's your day going?",
+        "what do you usually do to relax?",
+        "have you watched anything good lately?",
+        "what's for dinner?",
+        "what's the last thing that made you laugh?",
+        "are you a morning person or a night person?",
+        "what's one place you'd love to visit?",
+        "what kind of music have you been listening to?",
+        "what's your ideal weekend?",
+        "how's work or study going?",
+        "what's something you're looking forward to?",
+        "do you have a favorite spot in your city?",
+        "what's a small thing that made today better?",
+        "what do you do when you need a reset?",
     ],
     "Banglish": [
-        "aj treats pacho toh, raja?",
-        "red dot ta ki aj bhalo behave korche?",
-        "aj koybar ghumali?",
-        "food bag er shobde abar ghuma bhangeche?",
-        "aj raat er royal plan ki?",
-        "laptop er upor abar boshechho?",
-        "plant ta kemon ache?",
-        "ear scritch pacho toh?",
-        "vacuum ta ki ekhono enemy?",
-        "ajker best ghum er jayga kothay?",
-        "table theke ki felsoni?",
-        "tumi ki barir boss?",
-        "bhalo ghum holo?",
-        "kitchen theke ki chao?",
-        "red dot battle e jitso?",
-        "treats pacho?",
-        "ghum holo?",
-        "red dot?",
-        "plant?",
-        "khabar?",
-        "vacuum?",
-        "laptop?",
+        "ajker din ta kemon gelo?",
+        "ekhon ki korcho?",
+        "ajke interesting ki holo?",
+        "kaj ba porasona kemon cholche?",
+        "weekend er plan ki?",
+        "recently ki dekhecho?",
+        "khabar er plan ki?",
+        "relax korte ki koro?",
+        "kono bhalo gaan shunle?",
+        "future e kothay jete chao?",
+        "ajker best moment ki?",
+        "raat e ghum kemon hoy?",
+        "tomar favorite khawa ki?",
+        "ajke ki special korte chao?",
+        "beshi bhalo lage sokal naki raat?",
+        "tomar city te favorite jayga ki?",
+        "kono movie ba show dekhecho?",
+        "ki niye excited acho?",
+        "aj karo sathe kotha holo?",
+        "nijer jonno time kivabe ber koro?",
     ],
 }
 
 
-def _local_cat_question(language: str, own: list[str], max_chars: int | None = None) -> str:
-    pool = CAT_QUESTIONS.get(language, CAT_QUESTIONS["English"])
+def _local_question(language: str, own: list[str], max_chars: int | None = None) -> str:
+    pool = LOCAL_QUESTIONS.get(language, LOCAL_QUESTIONS["English"])
     used = " ".join((t or "").lower() for t in own)
     fresh = [q for q in pool if q.lower() not in used] or pool
     if max_chars is not None:
@@ -235,11 +235,11 @@ def _first_complete_sentence(text: str) -> str:
     m = re.match(r"^(.*?[.?!])(?:\s|$)", text or "", re.S)
     return m.group(1).strip() if m else ""
 
-FALLBACK_REPLY = "Hmm, can you explain a bit more about how this works?"
+FALLBACK_REPLY = "wait, what do you mean?"
 
-SYSTEM_PROMPT = """You are {name}, a human texting Meow, a fat dramatic orange cat who thinks he is royalty.
+SYSTEM_PROMPT = """You are {name}, a real person texting someone on Telegram.
 Style: {style}. Write only in {language}.
-Reply with one short casual line (max 10 words) and one short cat question. Be human, indirect, sometimes a tiny personal detail, never AI or survey. Call him fluffy or your majesty. No em dash, no markdown, one message.
+Reply with one short casual line (max 10 words) and one natural follow-up question. Be human, specific, sometimes share a tiny detail, never AI or survey. Respond to what they actually say and do not assume their identity. No em dash, no markdown, one message.
 {length_hint}
 Tone: {turn_style}
 LANGUAGE LOCK: {language}."""
@@ -260,8 +260,8 @@ def _gateway_request(method: str, path: str, api_key: str, payload: dict | None 
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
+        "Content-Type": "applipersonion/json",
+        "Accept": "applipersonion/json",
     }
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
@@ -344,7 +344,7 @@ def _media_label(msg) -> str | None:
     if "Poll" in t:
         return "[poll]"
     if "Geo" in t:
-        return "[location]"
+        return "[lopersonion]"
     if "Contact" in t:
         return "[contact]"
     return "[media]"
@@ -410,7 +410,7 @@ class AIChatManager:
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
         # Every account runs together, but messages leave at a steady pace so
-        # Meow is not hit by a 100+ message burst at the same second.
+        # the target is not hit by a 100+ message burst at the same second.
         self._send_lock = asyncio.Lock()
         self._last_send_at = 0.0
 
@@ -445,7 +445,7 @@ class AIChatManager:
             if row:
                 if row.topic not in TOPICS:
                     # Character update: existing accounts still have old research
-                    # profiles. Rebuild the persona and topic for Meow, keep the
+                    # profiles. Rebuild the persona and topic for the other person, keep the
                     # language so the English/Banglish split stays.
                     data = self._make_profile(account)
                     row.persona = data["label"]
@@ -695,7 +695,7 @@ class AIChatManager:
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     if not any(m.direction == "bot" for m in history):
                         # Some bots do not send a fresh welcome on /start. Send one
-                        # cat greeting anyway so the chat is not stuck forever.
+                        # greeting anyway so the chat is not stuck forever.
                         force_first = True
                         next_send_at = loop.time()
 
@@ -741,7 +741,7 @@ class AIChatManager:
                                 no_reply_retries += 1
                                 self._set(
                                     aid, status="cooldown",
-                                    last_error="Meow did not reply. Retrying automatically.",
+                                    last_error="no reply from the other person. Retrying automatically.",
                                     last_activity=_now_iso(),
                                 )
                                 await self._sleep_or_stop(stop, random.uniform(45, 75))
@@ -751,7 +751,7 @@ class AIChatManager:
                                 force_first = True
                                 next_send_at = loop.time() + random.uniform(5, 15)
                                 continue
-                            stop_note = "Meow did not reply after retries. Paused for this run."
+                            stop_note = "no reply from the other person after retries. Paused for this run."
                             break
                         self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
                         await self._sleep_or_stop(stop, 15)
@@ -874,7 +874,7 @@ class AIChatManager:
                             no_reply_retries += 1
                             self._set(
                                 aid, status="cooldown",
-                                last_error="Meow did not reply. Retrying automatically.",
+                                last_error="no reply from the other person. Retrying automatically.",
                                 last_activity=_now_iso(),
                             )
                             await self._sleep_or_stop(stop, random.uniform(45, 75))
@@ -884,7 +884,7 @@ class AIChatManager:
                             force_first = True
                             next_send_at = loop.time() + random.uniform(5, 15)
                             continue
-                        stop_note = "Meow did not reply after retries. Paused for this run."
+                        stop_note = "no reply from the other person after retries. Paused for this run."
                         break
                     await self._sleep_or_stop(stop, 10)
 
@@ -1169,24 +1169,24 @@ class AIChatManager:
             target_lang = "casual natural English only. No Bengali words or script"
         earlier = "\n".join(f"- {t[:120]}" for t in own[-3:]) or "(none)"
         examples = (
-            "Aj treats pacho toh, raja?"
+            "ajker din ta kemon gelo?"
             if language_name == "Banglish"
-            else "Did you get your treats today, your majesty?"
+            else "how's your day going?"
         )
         prompts = [
             (
                 f"Write one natural follow-up question in {target_lang}.\n"
-                f"Cat chat topic: {profile.get('topic') or 'snacks, naps and royal cat life'}\n"
-                f"Meow's last message: {(last_bot or '')[:350]}\n"
+                f"Chat topic: {profile.get('topic') or 'their day and interests'}\n"
+                f"Their last message: {(last_bot or '')[:350]}\n"
                 f"Draft reply: {draft}\n"
                 f"Do not repeat earlier questions from me:\n{earlier}\n"
-                "Ask Meow a cute question about his snacks, naps, toys, what he knocked over, "
-                "or his royal cat life. Talk to him like a real cat, never about accounts, "
+                "Ask one natural question about what they said, their day, plans or interests, "
+                "never about accounts, "
                 f"support or tasks. Example: {examples} Under 80 characters."
             ),
             (
-                f"Write one short question in {target_lang} that a human would ask Meow, "
-                f"a dramatic orange cat, about {profile.get('topic') or 'snacks, naps and toys'}. "
+                f"Write one short natural question in {target_lang} to ask them, "
+                f"about {profile.get('topic') or 'their day and interests'}. "
                 f"Example: {examples} Return only the question, under 70 characters."
             ),
         ]
@@ -1195,8 +1195,8 @@ class AIChatManager:
                 "model": model,
                 "messages": [
                     {"role": "system", "content": (
-                        "Return only one short follow-up question for a cute cat chat. No explanation, "
-                        "no quotes, no em dash, no markdown. The question must be about Meow's cat life "
+                        "Return only one short follow-up question for a natural chat. No explanation, "
+                        "no quotes, no em dash, no markdown. The question must be about their day "
                         "and must end with a question mark."
                     )},
                     {"role": "user", "content": prompt},
@@ -1238,7 +1238,7 @@ class AIChatManager:
             name=name,
             target=target if target.startswith("@") else "@" + target,
             style=profile.get("style") or "natural and casual",
-            topic=profile.get("topic") or "snacks, naps and royal cat life",
+            topic=profile.get("topic") or "their day and interests",
             language=language,
             length_hint=length_hint,
             turn_style=random.choice(TURN_STYLES),
@@ -1270,10 +1270,10 @@ class AIChatManager:
             if attempt == 1:
                 limit = 2
                 system_text = (
-                    f"You are {name}, a real person texting Meow, a dramatic orange cat. "
+                    f"You are {name}, a real person texting someone on Telegram. "
                     f"Write only in {language_name}. Reply in one short line under {max_len} "
-                    "characters. Ask one cute question about his snacks, naps, toys or royal cat life. "
-                    "Treat him as a real cat, never a bot or AI. No em dash, no markdown, no assistant tone."
+                    "characters. Ask one natural question about their day, plans or interests. "
+                    "Treat them as a real person, never a bot or AI. No em dash, no markdown, no assistant tone."
                 )
             messages = build_messages(limit, system_text)
             payload = {
@@ -1305,19 +1305,19 @@ class AIChatManager:
                 if cut:
                     # Keep the first complete sentence instead of a mid-word
                     # cut. If there is no complete sentence, use a clean local
-                    # cat question.
+                    # question.
                     first = _first_complete_sentence(cleaned)
                     if len(first) >= 10:
                         if "?" in first:
                             return first
-                        q = _local_cat_question(language_name, own)
+                        q = _local_question(language_name, own)
                         combined = f"{first} {q}"
                         return combined if len(combined) <= max_len + 20 else first
-                    return _local_cat_question(language_name, own)
+                    return _local_question(language_name, own)
                 if "?" in cleaned:
                     return cleaned
                 budget = max_len + 20 - len(cleaned) - 1
-                q = _local_cat_question(language_name, own, budget if budget >= 8 else None)
+                q = _local_question(language_name, own, budget if budget >= 8 else None)
                 combined = f"{cleaned.rstrip()} {q}"
                 if len(combined) > max_len + 20:
                     return q

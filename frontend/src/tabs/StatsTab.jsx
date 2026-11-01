@@ -57,7 +57,7 @@ function chatTitle(chat) {
       starting: 'Starting',
       thinking: 'Thinking',
       typing: 'Typing',
-      waiting: 'Waiting for Meow',
+      waiting: 'Waiting for reply',
       reading: 'Reading reply',
     }
     return labels[chat.status] || 'Working'
@@ -319,7 +319,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 stagger">
         <StatCard label="Done" value={done} hint="at 100 / 100" tone="--accent-mint" />
         <StatCard label="Working" value={working} hint="in progress" tone="--accent-sky" />
-        <StatCard label="Active" value={active} hint="talking to Meow" tone="--accent-sun" />
+        <StatCard label="Active" value={active} hint="talking" tone="--accent-sun" />
         <StatCard label="Limit reached" value={limits} hint="skip until reset" tone="--accent-rose" />
         <StatCard label="Not started" value={zero} hint="no messages yet" tone="--accent-peach" />
         <StatCard label="Needs retry" value={errors} hint="other errors" tone="--accent-rose" />
@@ -390,7 +390,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
               <div className="flex justify-between gap-3"><span>Model</span><span className="font-mono text-ink truncate max-w-[150px]" title={model}>{model.split('/').pop()}</span></div>
             </div>
             <div className="text-[10px] text-muted mt-4 leading-5">
-              Counts are read from Telegram. Live progress updates while chats are running. When Meow stops replying, the account pauses instead of hanging forever.
+              Counts are read from Telegram. Live progress updates while chats are running. When the other side stops replying, the account pauses instead of hanging forever.
             </div>
           </div>
 

@@ -190,6 +190,8 @@ export default function App() {
 
   const selected = accounts.find((a) => a.id === selectedId) || null
   const routedAccount = routePhone ? accounts.find((a) => samePhone(a.phone, routePhone)) || null : null
+  const activeOrder = accounts.filter((a) => a.status !== 'banned')
+  const routedIndex = routedAccount ? activeOrder.findIndex((a) => a.id === routedAccount.id) : -1
 
   return (
     <div className="h-screen w-screen flex flex-col bg-paper text-ink">
@@ -272,6 +274,18 @@ export default function App() {
                 routedAccount ? (
                   <AccountPage
                     account={routedAccount}
+                    accountNumber={routedIndex >= 0 ? routedIndex + 1 : null}
+                    accountTotal={activeOrder.length}
+                    onPrev={() => {
+                      if (!activeOrder.length) return
+                      const i = routedIndex > 0 ? routedIndex - 1 : activeOrder.length - 1
+                      openAccount(activeOrder[i].id)
+                    }}
+                    onNext={() => {
+                      if (!activeOrder.length) return
+                      const i = routedIndex >= 0 ? (routedIndex + 1) % activeOrder.length : 0
+                      openAccount(activeOrder[i].id)
+                    }}
                     onRefresh={() => { refreshAccounts(); refreshStats() }}
                     onOpenTab={(id) => { closeAccountRoute(); setFocusAlert(null); setTab(id) }}
                   />

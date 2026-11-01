@@ -120,7 +120,7 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
       </div>
 
       <div className="px-4 py-2 border-t border-[color:var(--hairline)] flex items-center justify-between text-[10px] text-muted font-mono">
-        <span>Meow's replies are read automatically</span>
+        <span>Replies are read automatically</span>
         <span>{chat.last_activity ? fmtClock(chat.last_activity) : ''}</span>
       </div>
     </div>
@@ -216,7 +216,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     lastFocusRef.current = focusTick
     const has = (status.accounts || []).some((c) => c.account_id === focusAccountId)
     if (!has) {
-      toast.info('No Meow chat yet for this account. Tick it and run.')
+      toast.info('No chat yet for this account. Tick it and run.')
       return
     }
     setFocusChatId(focusAccountId)
@@ -232,7 +232,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   function focusChat(id) {
     const has = (status?.accounts || []).some((c) => c.account_id === id)
     if (!has) {
-      toast.info('No Meow chat yet for this account. Tick it and run.')
+      toast.info('No chat yet for this account. Tick it and run.')
       return
     }
     setFocusChatId(id)
@@ -358,7 +358,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         return
       }
       if (ids.length > 5 && !confirm(
-        `Start Meow chats on ${ids.length} accounts?\n\n` +
+        `Start chats on ${ids.length} accounts?\n\n` +
         `Each account will send between ${minTurns} and ${maxTurns} messages.`
       )) {
         return
@@ -495,11 +495,10 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     <div className="space-y-5">
       <div className="nb-card p-5">
         <div className="micro-label">Companion</div>
-        <h1 className="display-title text-[30px] mt-2">Meow chat</h1>
+        <h1 className="display-title text-[30px] mt-2">AI chat</h1>
         <p className="text-sm text-muted mt-2 max-w-[68ch] leading-6">
-          Each selected account chats with Meow, a fat fluffy orange cat who is fully
-          convinced he is royalty. Every account gets its own personality and its own
-          cat conversation. The daily goal is 100 messages per account, reset at
+          Each selected account has a natural, human conversation with the target bot.
+          Every account gets its own personality and its own chat. The daily goal is 100 messages per account, reset at
           6:00 AM Bangladesh every day. The API key and model are stored only on this machine.
         </p>
         <p className="text-[11px] text-muted mt-3">
@@ -555,7 +554,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
               <input className="nb-input !py-2 font-mono text-[12px]" value={model} onChange={(e) => setModel(e.target.value)} />
             </label>
             <label>
-              <div className="micro-label mb-2">Meow bot</div>
+              <div className="micro-label mb-2">Target bot</div>
               <input className="nb-input !py-2 font-mono text-[12px]" value={target} onChange={(e) => setTarget(e.target.value)} />
             </label>
             <label>
@@ -746,7 +745,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
 
         <div className="nb-card p-5">
           <div className="micro-label">Status</div>
-          <h2 className="display-title text-[20px] mt-1">Cat chats</h2>
+          <h2 className="display-title text-[20px] mt-1">Live chats</h2>
           <div className="flex items-baseline gap-2 mt-4">
             <span className="display-title text-[38px] tabular-nums">{activeCount}</span>
             <span className="text-xs text-muted">active</span>
@@ -754,7 +753,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <div className="h-px bg-[color:var(--hairline)] my-4" />
           <div className="space-y-2 text-[12px] text-muted">
             <div className="flex justify-between gap-2"><span>Connected accounts</span><span className="font-mono text-ink">{connectedAccounts.length}</span></div>
-            <div className="flex justify-between gap-2"><span>Cat chats</span><span className="font-mono text-ink">{allChats.length}</span></div>
+            <div className="flex justify-between gap-2"><span>Live chats</span><span className="font-mono text-ink">{allChats.length}</span></div>
             <div className="flex justify-between gap-2"><span>Chats per account</span><span className="font-mono text-ink">{settings?.min_turns ?? 4} to {settings?.max_turns ?? 10}</span></div>
             <div className="flex justify-between gap-2"><span>Model</span><span className="font-mono text-ink truncate max-w-[160px]">{settings?.model || DEFAULT_MODEL}</span></div>
             <div className="flex justify-between gap-2"><span>Checked today</span><span className="font-mono text-ink">{dailyValues.length} accounts</span></div>
@@ -773,7 +772,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
           <div>
             <div className="micro-label">Live</div>
-            <h2 className="display-title text-[22px] mt-1">Meow conversations</h2>
+            <h2 className="display-title text-[22px] mt-1">Live conversations</h2>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {focusedChat && (
@@ -797,8 +796,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <div className="nb-card">
             <div className="empty-state">
               <span className="empty-icon"><span className="text-lg">...</span></span>
-              <div className="empty-title">No cat chats yet</div>
-              <div className="text-sm max-w-[40ch]">Pick a few accounts above and run them. Meow chats will appear here.</div>
+              <div className="empty-title">No chats yet</div>
+              <div className="text-sm max-w-[40ch]">Pick a few accounts above and run them. Chats will appear here.</div>
             </div>
           </div>
         ) : (
