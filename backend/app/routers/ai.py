@@ -3,6 +3,7 @@ import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,7 @@ from ..db import get_db
 from ..models import Account, AiChatMessage, AiChatProfile
 from ..schemas import AiCustomIn, AiDailyCountsIn, AiSettingsIn, AiStartIn, AiStopIn
 from ..tg_manager import manager
+from ..utils import bulk_stream
 from .. import ai_store
 from ..ai_chat import (
     DAILY_LIMIT,
@@ -276,10 +278,30 @@ async def send_custom_message(body: AiCustomIn, db: AsyncSession = Depends(get_d
     accounts = list(res.scalars().all())
     if not accounts:
         raise HTTPException(400, "No connected accounts selected")
-    result = await ai_manager.send_custom(accounts, target, text)
-    result["target"] = target
-    result["total"] = len(accounts)
-    return result
+    by_id = {a.id: a for a in accounts}
+    ordered = [by_id[i] for i in body.account_ids if i in by_id] if body.account_ids else accounts
+    rows = [
+        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+        for a in ordered
+    ]
+
+    async def _do(cli, aid):
+        if ai_manager.is_running(aid):
+            return "skipped", "AI chat is running"
+        acc = by_id.get(aid)
+        if not acc:
+            return "skipped", "account not found"
+        result = await ai_manager.send_custom([acc], target, text)
+        if result["sent"]:
+            return "ok", f"sent to {target}"
+        if result["errors"]:
+            raise RuntimeError(result["errors"][0]["error"])
+        return "skipped", "not connected"
+
+    return StreamingResponse(
+        bulk_stream(rows, _do, concurrency=10),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.post("/chat/start")

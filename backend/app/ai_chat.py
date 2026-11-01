@@ -1076,12 +1076,24 @@ class AIChatManager:
                     await self._persist(
                         acc.id, "me", text, message.id, is_custom=True,
                     )
+                    asyncio.create_task(
+                        self._watch_custom_reply(acc.id, cli, entity, message.id),
+                        name=f"custom-reply-{acc.id}",
+                    )
                     sent.append(acc.id)
                 except Exception as e:
                     errors.append({"account_id": acc.id, "error": str(e)[:200]})
 
         await asyncio.gather(*(one(a) for a in accounts))
         return {"sent": sent, "skipped": skipped, "errors": errors}
+
+    async def _watch_custom_reply(self, account_id: int, cli, entity, after_id: int):
+        try:
+            await self._wait_for_bot(
+                account_id, cli, entity, after_id, asyncio.Event(), timeout=90,
+            )
+        except Exception:
+            pass
 
     async def _wait_for_bot(self, account_id: int, cli, entity, after_id: int,
                             stop: asyncio.Event, timeout: float = 120.0) -> bool:

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
+import ProgressModal from '../components/ProgressModal.jsx'
+import { useBulkProgress } from '../lib/useBulkProgress'
 
 const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash-0731'
 const DEFAULT_TARGET = '@folkapp_bot'
@@ -129,6 +131,8 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
 
 export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
+  const customLiveUntil = useRef(0)
   const [settings, setSettings] = useState(null)
   const [status, setStatus] = useState(null)
   const [selected, setSelected] = useState([])
@@ -185,7 +189,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
       if (s?.settings) {
         setSettings((prev) => (prev ? { ...prev, ...s.settings } : s.settings))
       }
-      delay = s?.running ? (s.running > 20 ? 4000 : 2500) : 8000
+      delay = s?.running
+        ? (s.running > 20 ? 4000 : 2500)
+        : (Date.now() < customLiveUntil.current ? 3000 : 8000)
       if (alive) timer = setTimeout(tick, delay)
     }
     tick()
@@ -327,11 +333,11 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     )) return
     setSendingCustom(true)
     try {
-      const r = await Endpoints.sendAiCustom(ids, text)
-      if (r.sent?.length) toast.success(`Custom message sent from ${r.sent.length} account${r.sent.length === 1 ? '' : 's'}`)
-      if (r.skipped?.length) toast.info(`${r.skipped.length} account${r.skipped.length === 1 ? ' is' : 's are'} running or disconnected`)
-      if (r.errors?.length) toast.error(`${r.errors.length} account${r.errors.length === 1 ? '' : 's'} failed`)
-      if (r.sent?.length) setCustomMessage('')
+      await run(`Custom message (${ids.length} accounts)`, (onEvent) =>
+        Endpoints.sendAiCustom(ids, text, onEvent))
+      customLiveUntil.current = Date.now() + 120000
+      setCustomMessage('')
+      toast.success('Custom send finished. Replies will appear live below.')
       await refreshStatus()
     } catch (e) {
       toast.error(e.message)
@@ -624,7 +630,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
                 : `connected (${connectedAccounts.length})`}`}
           </button>
           <span className="text-[10px] text-muted">
-            One message per account. AI tasks already running are skipped.
+            One message per account. AI tasks already running are skipped. Bot replies appear live below.
           </span>
         </div>
       </div>
@@ -815,6 +821,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           </div>
         )}
       </div>
+
+      <ProgressModal progress={progress} onClose={close} />
     </div>
   )
 }
