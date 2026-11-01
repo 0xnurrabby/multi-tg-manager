@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shutil
+import subprocess
 import sys
 import urllib.request
 from datetime import datetime, timezone
@@ -18,6 +20,35 @@ DOWNLOAD_URL = (
     "cloudflared-windows-amd64.exe"
 )
 URL_RE = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com", re.I)
+
+
+def _kill_stale_local_tunnels():
+    if not sys.platform.startswith("win"):
+        return
+    script = (
+        "$p = Get-CimInstance Win32_Process -Filter \"Name = 'cloudflared.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*--url http://localhost:8000*' } | "
+        "Select-Object -ExpandProperty ProcessId; "
+        "$p | ConvertTo-Json -Compress"
+    )
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=20,
+        )
+        raw = (out.stdout or "").strip()
+        if not raw:
+            return
+        data = json.loads(raw)
+        pids = [data] if isinstance(data, int) else list(data or [])
+        for pid in pids:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, timeout=10,
+            )
+            log.info("cleaned stale cloudflared pid=%s", pid)
+    except Exception as e:
+        log.warning("stale tunnel cleanup failed: %s", e)
 
 
 class TunnelManager:
@@ -99,6 +130,7 @@ class TunnelManager:
     async def _run(self):
         proc = None
         try:
+            await asyncio.to_thread(_kill_stale_local_tunnels)
             exe = await self._ensure_binary()
             self._state.update(status="starting", error="")
             proc = await asyncio.create_subprocess_exec(
