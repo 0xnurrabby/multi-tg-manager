@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..models import Account, AiChatMessage, AiChatProfile
-from ..schemas import AiDailyCountsIn, AiSettingsIn, AiStartIn, AiStopIn
+from ..schemas import AiCustomIn, AiDailyCountsIn, AiSettingsIn, AiStartIn, AiStopIn
 from ..tg_manager import manager
 from .. import ai_store
 from ..ai_chat import (
@@ -59,6 +59,7 @@ def _msg_dict(m: AiChatMessage) -> dict:
         "tg_msg_id": m.tg_msg_id,
         "reply_to_text": m.reply_to_text,
         "reaction": m.reaction,
+        "is_custom": bool(m.is_custom),
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
 
@@ -258,6 +259,29 @@ async def daily_counts(body: AiDailyCountsIn, db: AsyncSession = Depends(get_db)
     }
 
 
+@router.post("/chat/custom")
+async def send_custom_message(body: AiCustomIn, db: AsyncSession = Depends(get_db)):
+    text = (body.message or "").strip()
+    if not text:
+        raise HTTPException(400, "Write a custom message first")
+    if len(text) > 4096:
+        raise HTTPException(400, "Custom message is too long")
+    cfg = await ai_store.get_settings()
+    target = _normalize_target(cfg.get("target")) or ai_store.DEFAULT_TARGET
+
+    q = select(Account).where(Account.status != "banned")
+    if body.account_ids:
+        q = q.where(Account.id.in_(body.account_ids))
+    res = await db.execute(q)
+    accounts = list(res.scalars().all())
+    if not accounts:
+        raise HTTPException(400, "No connected accounts selected")
+    result = await ai_manager.send_custom(accounts, target, text)
+    result["target"] = target
+    result["total"] = len(accounts)
+    return result
+
+
 @router.post("/chat/start")
 async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
     if not body.account_ids:
@@ -291,6 +315,10 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
             if p.limit_day == today
         }
 
+    custom_reset = set(
+        await ai_manager.reset_context_after_custom([a.id for a in accounts])
+    )
+
     seen = set()
     for acc in accounts:
         seen.add(acc.id)
@@ -323,7 +351,7 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
                 acc, cfg["api_key"], model, target,
                 cfg.get("min_turns") or 4, cfg.get("max_turns") or 10,
                 fixed_target=remaining,
-                skip_start=body.fill_daily,
+                skip_start=body.fill_daily or acc.id in custom_reset,
                 daily_sent=counts.get(acc.id, 0) if body.fill_daily else 0,
                 daily_limit=DAILY_LIMIT if body.fill_daily else 0,
                 fill_daily=body.fill_daily,

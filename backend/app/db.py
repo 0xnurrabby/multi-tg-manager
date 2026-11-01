@@ -64,6 +64,10 @@ async def _migrate_sqlite(conn):
         await conn.exec_driver_sql(
             "ALTER TABLE ai_chat_messages ADD COLUMN reaction VARCHAR(8)"
         )
+    if "is_custom" not in ai_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE ai_chat_messages ADD COLUMN is_custom BOOLEAN DEFAULT 0"
+        )
 
     res = await conn.exec_driver_sql("PRAGMA table_info('ai_chat_profiles')")
     prof_cols = {row[1] for row in res.all()}

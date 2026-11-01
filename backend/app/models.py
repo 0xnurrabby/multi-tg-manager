@@ -89,6 +89,7 @@ class AiChatMessage(Base):
     tg_msg_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reply_to_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     reaction: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 

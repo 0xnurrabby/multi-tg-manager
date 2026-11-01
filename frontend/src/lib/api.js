@@ -180,6 +180,7 @@ export const Endpoints = {
   aiStatus: (limit = 30, includeMessages = true) => api.get('/api/ai/chat/status', { limit, include_messages: includeMessages }),
   aiDailyCounts: (accountIds) => api.post('/api/ai/chat/daily_counts', { account_ids: accountIds }),
   startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }),
+  sendAiCustom: (accountIds, message) => api.post('/api/ai/chat/custom', { account_ids: accountIds, message }),
   stopAiChats: (accountIds) => api.post('/api/ai/chat/stop', { account_ids: accountIds }),
 
   joinGroup: (id, target) => api.post(`/api/groups/${id}/join`, { target }),

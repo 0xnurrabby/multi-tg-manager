@@ -109,8 +109,9 @@ function ChatCard({ chat, target, focused, onStop, stopping }) {
                 )}
                 <div className="whitespace-pre-wrap">{m.text}</div>
                 {m.reaction && <div className="mt-1 text-[13px] leading-none">{m.reaction}</div>}
-                <div className={'text-[9px] font-mono mt-1 text-right ' + (out ? 'text-paper/55' : 'text-muted')}>
-                  {fmtClock(m.created_at)}
+                <div className={'flex items-center justify-end gap-1.5 text-[9px] font-mono mt-1 text-right ' + (out ? 'text-paper/55' : 'text-muted')}>
+                  {out && m.is_custom && <span className="uppercase tracking-[0.08em]">custom</span>}
+                  <span>{fmtClock(m.created_at)}</span>
                 </div>
               </div>
             </div>
@@ -145,6 +146,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const [busy, setBusy] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [filling, setFilling] = useState(false)
+  const [customMessage, setCustomMessage] = useState('')
+  const [sendingCustom, setSendingCustom] = useState(false)
   const [checkingDaily, setCheckingDaily] = useState(false)
   const [dailyCounts, setDailyCounts] = useState({})
   const [dailyLimit, setDailyLimit] = useState(100)
@@ -303,6 +306,37 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
       toast.error(e.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function sendCustomMessage() {
+    const text = customMessage.trim()
+    if (!text) {
+      toast.error('Write a custom message first')
+      return
+    }
+    const source = selected.length ? selected : connectedAccounts.map((a) => a.id)
+    const ids = source.filter((id) => accounts.some((a) => a.id === id && a.status === 'connected'))
+    if (ids.length === 0) {
+      toast.error('No connected accounts selected')
+      return
+    }
+    if (!confirm(
+      `Send this exact message from ${ids.length} account${ids.length === 1 ? '' : 's'} to ${settings?.target || DEFAULT_TARGET}?\n\n` +
+      `The AI chat will ignore this message and start fresh.`
+    )) return
+    setSendingCustom(true)
+    try {
+      const r = await Endpoints.sendAiCustom(ids, text)
+      if (r.sent?.length) toast.success(`Custom message sent from ${r.sent.length} account${r.sent.length === 1 ? '' : 's'}`)
+      if (r.skipped?.length) toast.info(`${r.skipped.length} account${r.skipped.length === 1 ? ' is' : 's are'} running or disconnected`)
+      if (r.errors?.length) toast.error(`${r.errors.length} account${r.errors.length === 1 ? '' : 's'} failed`)
+      if (r.sent?.length) setCustomMessage('')
+      await refreshStatus()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setSendingCustom(false)
     }
   }
 
@@ -551,6 +585,47 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           )}
           <span className="micro-label ml-auto">
             {model.includes('deepseek') ? 'DeepSeek V4 Flash' : model.includes('haiku') ? 'Claude Haiku 5.5' : model.split('/').pop()}
+          </span>
+        </div>
+      </div>
+
+      {/* Manual first message */}
+      <div
+        className="nb-card p-5"
+        style={{ background: 'linear-gradient(135deg, rgb(var(--accent-peach) / 0.34), rgb(var(--surface)) 62%, rgb(var(--accent-sky) / 0.22))' }}
+      >
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="micro-label">Manual opener</div>
+            <h2 className="display-title text-[21px] mt-1">Send a custom message</h2>
+            <p className="text-[12px] text-muted mt-2 max-w-[66ch] leading-5">
+              This exact text is sent from each account, with no AI generation. The AI chat
+              excludes it from context and starts its own conversation afterwards.
+            </p>
+          </div>
+          <span className="nb-badge">Not AI</span>
+        </div>
+        <textarea
+          className="nb-input mt-4 min-h-[92px] resize-y"
+          maxLength={4096}
+          placeholder={`Type the exact message to send to ${settings?.target || DEFAULT_TARGET}...`}
+          value={customMessage}
+          onChange={(e) => setCustomMessage(e.target.value)}
+        />
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
+          <button
+            className="nb-btn-pri"
+            onClick={sendCustomMessage}
+            disabled={sendingCustom || !customMessage.trim()}
+          >
+            {sendingCustom
+              ? 'Sending...'
+              : `Send to all ${selected.length
+                ? `selected (${selected.filter((id) => accounts.some((a) => a.id === id && a.status === 'connected')).length})`
+                : `connected (${connectedAccounts.length})`}`}
+          </button>
+          <span className="text-[10px] text-muted">
+            One message per account. AI tasks already running are skipped.
           </span>
         </div>
       </div>

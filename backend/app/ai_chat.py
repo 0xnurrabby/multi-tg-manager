@@ -511,6 +511,37 @@ class AIChatManager:
             "last_activity": _now_iso(),
         }
 
+    async def reset_context_after_custom(self, account_ids: list[int]) -> list[int]:
+        """A custom outgoing message starts a fresh AI context.
+
+        The custom line itself is already filtered from the AI history, but reset
+        also drops any bot replies it triggered so the AI starts on its own.
+        """
+        if not account_ids:
+            return []
+        now = datetime.utcnow()
+        changed: set[int] = set()
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(AiChatProfile).where(AiChatProfile.account_id.in_(account_ids))
+            )
+            profiles = {p.account_id: p for p in res.scalars().all()}
+            res = await db.execute(
+                select(AiChatMessage.account_id, AiChatMessage.created_at).where(
+                    AiChatMessage.account_id.in_(account_ids),
+                    AiChatMessage.is_custom == True,  # noqa: E712
+                )
+            )
+            for account_id, created_at in res.all():
+                prof = profiles.get(account_id)
+                if prof is None or prof.reset_at is None or created_at >= prof.reset_at:
+                    changed.add(account_id)
+                    if prof is not None:
+                        prof.reset_at = now
+            if changed:
+                await db.commit()
+        return sorted(changed)
+
     async def _mark_limit_reached(self, account_id: int):
         day = bd_day_key()
         try:
@@ -954,7 +985,10 @@ class AIChatManager:
 
     async def _load_history(self, account_id: int, limit: int = 24, reset_at=None):
         async with AsyncSessionLocal() as db:
-            q = select(AiChatMessage).where(AiChatMessage.account_id == account_id)
+            q = select(AiChatMessage).where(
+                AiChatMessage.account_id == account_id,
+                AiChatMessage.is_custom == False,  # noqa: E712
+            )
             if reset_at is not None:
                 q = q.where(AiChatMessage.created_at >= reset_at)
             q = q.order_by(desc(AiChatMessage.id)).limit(max(2, min(limit, 400)))
@@ -964,7 +998,8 @@ class AIChatManager:
         return rows
 
     async def _persist(self, account_id: int, direction: str, text: str,
-                       tg_msg_id: int | None = None, reply_to_text: str | None = None):
+                       tg_msg_id: int | None = None, reply_to_text: str | None = None,
+                       is_custom: bool = False):
         text = (text or "").strip()
         if not text:
             return
@@ -984,9 +1019,38 @@ class AIChatManager:
                 text=text,
                 tg_msg_id=tg_msg_id,
                 reply_to_text=reply_to_text,
+                is_custom=bool(is_custom),
                 created_at=datetime.utcnow(),
             ))
             await db.commit()
+
+    async def send_custom(self, accounts: list[Account], target: str, text: str) -> dict:
+        sent: list[int] = []
+        skipped: list[int] = []
+        errors: list[dict] = []
+        sem = asyncio.Semaphore(10)
+
+        async def one(acc: Account):
+            if self.is_running(acc.id):
+                skipped.append(acc.id)
+                return
+            cli = manager.get(acc.id)
+            if not cli or not cli.is_connected():
+                skipped.append(acc.id)
+                return
+            async with sem:
+                try:
+                    entity = await cli.get_entity(target.lstrip("@"))
+                    message = await self._send_paced(cli, entity, text)
+                    await self._persist(
+                        acc.id, "me", text, message.id, is_custom=True,
+                    )
+                    sent.append(acc.id)
+                except Exception as e:
+                    errors.append({"account_id": acc.id, "error": str(e)[:200]})
+
+        await asyncio.gather(*(one(a) for a in accounts))
+        return {"sent": sent, "skipped": skipped, "errors": errors}
 
     async def _wait_for_bot(self, account_id: int, cli, entity, after_id: int,
                             stop: asyncio.Event, timeout: float = 120.0) -> bool:

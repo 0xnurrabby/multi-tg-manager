@@ -297,6 +297,11 @@ class AiDailyCountsIn(BaseModel):
     account_ids: list[int] = Field(default_factory=list)
 
 
+class AiCustomIn(BaseModel):
+    account_ids: list[int] = Field(default_factory=list)
+    message: str
+
+
 class BulkProgressEvent(BaseModel):
     type: str  # "progress" | "done"
     current: int = 0
