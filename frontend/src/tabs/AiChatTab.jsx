@@ -496,6 +496,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const dailyValues = Object.values(dailyCounts).map((n) => Number(n) || 0)
   const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
   const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
+  const limitCount = allChats.filter((c) => c.status === 'limit').length
 
   return (
     <div className="space-y-5">
@@ -764,7 +765,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="flex justify-between gap-2"><span>Model</span><span className="font-mono text-ink truncate max-w-[160px]">{settings?.model || DEFAULT_MODEL}</span></div>
             <div className="flex justify-between gap-2"><span>Checked today</span><span className="font-mono text-ink">{dailyValues.length} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Messages today</span><span className="font-mono text-ink">{dailyTotal}</span></div>
-            <div className="flex justify-between gap-2"><span>At daily limit</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
+            <div className="flex justify-between gap-2"><span>At 100 messages</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
+            <div className="flex justify-between gap-2"><span>Bot limit reached</span><span className="font-mono text-ink">{limitCount} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">6:00 AM Bangladesh</span></div>
           </div>
           <div className="text-[10px] text-muted mt-4 leading-5">
