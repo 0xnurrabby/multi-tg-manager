@@ -94,10 +94,18 @@ def _record_failed(ip: str):
 
 
 def _client_ip(req: Request) -> str:
+    cf = req.headers.get("cf-connecting-ip")
+    if cf:
+        return cf.strip()
     fwd = req.headers.get("x-forwarded-for")
     if fwd:
         return fwd.split(",")[0].strip()
     return req.client.host if req.client else "unknown"
+
+
+def _is_https(req: Request) -> bool:
+    proto = (req.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    return req.url.scheme == "https" or proto == "https"
 
 
 # --- FastAPI dependency ---
@@ -133,7 +141,7 @@ async def login(body: LoginIn, request: Request, response: Response):
         max_age=settings.SESSION_DAYS * 86400,
         httponly=True,
         samesite="lax",
-        secure=False,  # served on localhost; set True if you put behind HTTPS
+        secure=_is_https(request),
         path="/",
     )
     # clear failed attempts on success

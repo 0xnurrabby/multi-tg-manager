@@ -51,6 +51,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Multi TG Manager", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if request.url.scheme == "https" or proto == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.ALLOWED_ORIGIN, "http://127.0.0.1:5173"],
