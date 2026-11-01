@@ -350,12 +350,29 @@ html.dark {
   transition: background-color 160ms ease-out, box-shadow 160ms ease-out;
 }
 .account-row:hover { background: rgb(var(--ink) / 0.025); }
-.account-row-active {
-  background: rgb(var(--ink) / 0.03);
-  box-shadow: inset 3px 0 0 rgb(var(--accent-sun));
+.account-row-active,
+.account-row-active:hover {
+  background: linear-gradient(
+    100deg,
+    rgb(var(--accent-sun) / 0.58),
+    rgb(var(--accent-mint) / 0.42) 58%,
+    rgb(var(--accent-sky) / 0.28)
+  );
+  box-shadow:
+    inset 4px 0 0 rgb(var(--accent-sun)),
+    inset 0 0 0 1px rgb(var(--accent-sun) / 0.65);
 }
-.dark .account-row-active {
-  box-shadow: inset 3px 0 0 rgb(var(--accent-sun));
+.dark .account-row-active,
+.dark .account-row-active:hover {
+  background: linear-gradient(
+    100deg,
+    rgb(var(--accent-sun) / 0.28),
+    rgb(var(--accent-mint) / 0.20) 58%,
+    rgb(var(--accent-sky) / 0.16)
+  );
+  box-shadow:
+    inset 4px 0 0 rgb(var(--accent-sun)),
+    inset 0 0 0 1px rgb(var(--accent-sun) / 0.45);
 }
 
 .stat-chip {

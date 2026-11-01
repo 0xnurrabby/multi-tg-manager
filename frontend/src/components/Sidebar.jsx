@@ -119,11 +119,18 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
             <div
               key={a.id}
               onClick={() => onSelect(a.id)}
+              aria-current={sel ? 'true' : undefined}
               className={'account-row flex items-start gap-3 px-4 py-3 ' + (sel ? 'account-row-active' : '')}
             >
-              <div className="w-5 shrink-0 self-center text-right font-mono text-[11px] tracking-wide text-muted select-none">
-                {serial}
-              </div>
+              {sel ? (
+                <span className="w-5 h-5 shrink-0 self-center rounded-full bg-brand-pri text-black grid place-items-center shadow-sm">
+                  <Icon name="check" size={12} strokeWidth={2.4} />
+                </span>
+              ) : (
+                <div className="w-5 shrink-0 self-center text-right font-mono text-[11px] tracking-wide text-muted select-none">
+                  {serial}
+                </div>
+              )}
               <AccountAvatar account={a} size={40} showOnline />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
