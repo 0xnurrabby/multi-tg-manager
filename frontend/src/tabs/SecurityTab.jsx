@@ -498,6 +498,26 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
     onChange?.()
   }
 
+  function emailErrorMessage(e) {
+    const msg = String(e?.message || '')
+    if (msg.includes('EMAIL_NOT_ALLOWED')) {
+      return 'Telegram rejected this email address. Use a normal email (Gmail, Outlook, or a real domain), not a temporary or disposable one.'
+    }
+    if (msg.includes('EMAIL_NOT_SETUP')) {
+      return 'This account has no login email yet. Telegram requires setting one in the Telegram app first.'
+    }
+    if (msg.includes('CODE_INVALID')) {
+      return 'That code is incorrect. Use the code sent to the new email, not the Telegram login code.'
+    }
+    if (msg.includes('EMAIL_VERIFY_EXPIRED')) {
+      return 'The email verification code expired. Send a new code.'
+    }
+    if (msg.includes('EMAIL_INVALID')) {
+      return 'Telegram rejected this email address as invalid.'
+    }
+    return msg
+  }
+
   async function sendCode() {
     if (!selected) return
     const value = email.trim()
@@ -514,7 +534,7 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
       setStep('code')
       toast.success('Verification code sent to the new email')
     } catch (e) {
-      toast.error(e.message)
+      toast.error(emailErrorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -538,7 +558,7 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
       setCodeLength(0)
       await onChange?.()
     } catch (e) {
-      toast.error(e.message)
+      toast.error(emailErrorMessage(e))
     } finally {
       setBusy(false)
     }
@@ -621,25 +641,31 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
             {known && hasEmail && (
               <div className="mt-3 space-y-3">
                 {step === 'email' && (
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <input
-                      className="nb-input flex-1"
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="new email address"
-                    />
-                    <button className="nb-btn-pri !px-4" disabled={busy} onClick={sendCode}>
-                      {busy ? 'Sending...' : 'Send code'}
-                    </button>
-                  </div>
+                  <>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        className="nb-input flex-1"
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="new email address"
+                      />
+                      <button className="nb-btn-pri !px-4" disabled={busy} onClick={sendCode}>
+                        {busy ? 'Sending...' : 'Send code'}
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-muted">
+                      Use a real email. Telegram rejects temporary or disposable domains (EMAIL_NOT_ALLOWED).
+                    </div>
+                  </>
                 )}
 
                 {step === 'code' && (
                   <div className="space-y-2">
                     <div className="nb-note nb-note-info px-3 py-2 text-sm">
                       Code sent to {sentPattern || email.trim()}
-                      {codeLength ? ` (${codeLength} digits)` : ''}.
+                      {codeLength ? ` (${codeLength} digits)` : ''}. Use the code from
+                      the new email, not the Telegram login code.
                     </div>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input

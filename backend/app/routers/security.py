@@ -192,6 +192,27 @@ async def bulk_2fa(body: Bulk2faIn, db: AsyncSession = Depends(get_db)):
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
+def _email_error_text(e: Exception) -> str:
+    raw = str(e).upper()
+    if "EMAIL_NOT_ALLOWED" in raw:
+        return (
+            "Telegram rejected this email address. Use a normal email (Gmail, "
+            "Outlook, or a real domain), not a temporary or disposable one."
+        )
+    if "EMAIL_NOT_SETUP" in raw:
+        return (
+            "This account has no login email yet. Telegram requires setting "
+            "one in the Telegram app before it can be changed."
+        )
+    if "CODE_INVALID" in raw:
+        return "That code is incorrect. Use the code sent to the new email."
+    if "EMAIL_VERIFY_EXPIRED" in raw:
+        return "The email verification code expired. Send a new code."
+    if "EMAIL_INVALID" in raw:
+        return "Telegram rejected this email address as invalid."
+    return friendly_error(e)
+
+
 async def _refresh_email_status(cli, account_id: int):
     pw = await cli(GetPasswordRequest())
     pattern = (getattr(pw, "login_email_pattern", "") or "").strip()
@@ -262,13 +283,7 @@ async def send_login_email_code(account_id: int, body: EmailLoginSendIn):
     except FloodWaitError as e:
         raise HTTPException(429, f"Rate limited - wait {e.seconds}s") from None
     except Exception as e:
-        message = friendly_error(e)
-        if "EMAIL_NOT_SETUP" in str(e).upper():
-            message = (
-                "This account has no login email yet. Telegram requires setting "
-                "one in the Telegram app before it can be changed."
-            )
-        raise HTTPException(400, message) from None
+        raise HTTPException(400, _email_error_text(e)) from None
     return {
         "email": email,
         "email_pattern": sent.email_pattern,
@@ -294,7 +309,7 @@ async def verify_login_email_code(account_id: int, body: EmailLoginVerifyIn):
     except FloodWaitError as e:
         raise HTTPException(429, f"Rate limited - wait {e.seconds}s") from None
     except Exception as e:
-        raise HTTPException(400, friendly_error(e)) from None
+        raise HTTPException(400, _email_error_text(e)) from None
     try:
         pattern, has_2fa, checked = await _refresh_email_status(cli, account_id)
     except Exception:
