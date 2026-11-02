@@ -355,7 +355,7 @@ async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
     custom_reset = set(
         await ai_manager.reset_context_after_custom([a.id for a in accounts])
     )
-    stagger_max = min(480.0, max(20.0, len(accounts) * 2.4))
+    stagger_max = min(240.0, max(15.0, len(accounts) * 2.4))
 
     seen = set()
     for acc in accounts:
