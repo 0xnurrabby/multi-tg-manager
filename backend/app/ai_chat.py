@@ -138,7 +138,7 @@ TOPICS = [
     "petty daily drama",
 ]
 
-REACTION_EMOJIS = ["❤", "👍", "🔥", "😂", "🤔", "👏", "😮", "🎉", "😍"]
+REACTION_EMOJIS = ["👍", "🔥", "😂", "🤔", "👏", "😮", "🎉", "😍"]
 
 TURN_STYLES = [
     "react to their last message and ask one thing",
@@ -720,6 +720,7 @@ class AIChatManager:
             limit_reached = False
             stop_note = ""
             sent_window: list[float] = []
+            follow_up_pending = False
             reaction_rate = float(self._state.get(aid, {}).get("reaction_rate") or 0.12)
             quote_rate = float(self._state.get(aid, {}).get("quote_rate") or 0.4)
             while not stop.is_set():
@@ -732,6 +733,8 @@ class AIChatManager:
                     continue
 
                 last = history[-1] if history else None
+                if follow_up_pending and last and last.direction == "bot":
+                    follow_up_pending = False
                 if last and last.direction == "bot" and _is_limit_message(last.text):
                     await self._mark_limit_reached(aid)
                     limit_reached = True
@@ -740,30 +743,24 @@ class AIChatManager:
                 if last and last.direction == "me" and not force_first:
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     after = last.tg_msg_id or 0
-                    got = await self._wait_for_bot(aid, cli, entity, after, stop, timeout=120)
+                    got = await self._wait_for_bot(
+                        aid, cli, entity, after, stop, timeout=random.uniform(40, 55),
+                    )
                     if stop.is_set():
                         break
                     if not got:
-                        bot_timeouts += 1
-                        if bot_timeouts >= 2:
-                            if no_reply_retries < 4:
-                                no_reply_retries += 1
-                                self._set(
-                                    aid, status="cooldown",
-                                    last_error="no reply from the other person. Retrying automatically.",
-                                    last_activity=_now_iso(),
-                                )
-                                await self._sleep_or_stop(stop, random.uniform(45, 75))
-                                if stop.is_set():
-                                    break
-                                bot_timeouts = 0
-                                force_first = True
-                                next_send_at = loop.time() + random.uniform(5, 15)
-                                continue
+                        no_reply_retries += 1
+                        if no_reply_retries > 8:
                             stop_note = "no reply from the other person after retries. Paused for this run."
                             break
-                        self._set(aid, status="waiting", last_error="", last_activity=_now_iso())
-                        await self._sleep_or_stop(stop, 15)
+                        force_first = True
+                        follow_up_pending = True
+                        next_send_at = loop.time() + random.uniform(3, 8)
+                        self._set(
+                            aid, status="cooldown",
+                            last_error="no reply yet, sending a natural follow-up.",
+                            last_activity=_now_iso(),
+                        )
                         continue
                     bot_timeouts = 0
                     no_reply_retries = 0
@@ -778,7 +775,7 @@ class AIChatManager:
 
                 if force_first:
                     force_first = False
-                    if skip_start:
+                    if skip_start and not follow_up_pending:
                         self._set(aid, status="starting", last_error="", last_activity=_now_iso())
                         await self._sleep_or_stop(stop, random.uniform(5, 12))
                         if stop.is_set():
@@ -821,6 +818,7 @@ class AIChatManager:
                     self._set(aid, status="thinking", last_activity=_now_iso())
                     reply = await self._generate_reply(
                         api_key, model, target, name, profile, history, length_mode,
+                        follow_up=follow_up_pending,
                     )
                     consecutive_errors = 0
                 except GatewayError as e:
@@ -879,12 +877,15 @@ class AIChatManager:
                 turns_done += 1
                 daily_sent += 1
                 next_send_at = 0.0
+                follow_up_pending = False
                 self._set(
                     aid, turns_done=turns_done, daily_sent=daily_sent,
                     status="waiting", last_activity=_now_iso(),
                 )
 
-                got = await self._wait_for_bot(aid, cli, entity, sent.id, stop, timeout=120)
+                got = await self._wait_for_bot(
+                    aid, cli, entity, sent.id, stop, timeout=random.uniform(40, 55),
+                )
                 if stop.is_set():
                     break
                 if got:
@@ -893,25 +894,18 @@ class AIChatManager:
                     next_send_at = loop.time() + random.uniform(2.0, 12.0)
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
-                    bot_timeouts += 1
-                    if bot_timeouts >= 2:
-                        if no_reply_retries < 4:
-                            no_reply_retries += 1
-                            self._set(
-                                aid, status="cooldown",
-                                last_error="no reply from the other person. Retrying automatically.",
-                                last_activity=_now_iso(),
-                            )
-                            await self._sleep_or_stop(stop, random.uniform(45, 75))
-                            if stop.is_set():
-                                break
-                            bot_timeouts = 0
-                            force_first = True
-                            next_send_at = loop.time() + random.uniform(5, 15)
-                            continue
+                    no_reply_retries += 1
+                    if no_reply_retries > 8:
                         stop_note = "no reply from the other person after retries. Paused for this run."
                         break
-                    await self._sleep_or_stop(stop, 10)
+                    force_first = True
+                    follow_up_pending = True
+                    next_send_at = loop.time() + random.uniform(3, 8)
+                    self._set(
+                        aid, status="cooldown",
+                        last_error="no reply yet, sending a natural follow-up.",
+                        last_activity=_now_iso(),
+                    )
 
             if turns_done >= turn_target:
                 final_status = "completed"
@@ -1290,7 +1284,7 @@ class AIChatManager:
 
     async def _generate_reply(self, api_key: str, model: str, target: str, name: str,
                               profile: dict, history: list[AiChatMessage],
-                              length_mode: str = "short") -> str:
+                              length_mode: str = "short", follow_up: bool = False) -> str:
         language_name = profile.get("language") or "English"
         if language_name == "Banglish":
             language = "casual Banglish (Romanized Bengali + English), no Bengali script"
@@ -1313,6 +1307,45 @@ class AIChatManager:
             for m in history
             if m.direction == "me" and (m.text or "").strip() not in ("", "/start", FALLBACK_REPLY)
         ][-4:]
+
+        if follow_up:
+            last_own = own[-1] if own else "hey"
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": (
+                        f"You are {name}, a real person texting on Telegram. They have not replied "
+                        f"to your last message yet. Write one short, natural follow-up in {language}. "
+                        "Do not repeat the last message, do not ask the same question, no AI or "
+                        "assistant tone, no em dash, no markdown. One line under 80 characters."
+                    )},
+                    {"role": "user", "content": (
+                        f"Chat topic: {profile.get('topic') or 'their day and interests'}\n"
+                        f"Your last message: {last_own}\nWrite one short follow-up."
+                    )},
+                ],
+                "temperature": 0.9,
+                "max_tokens": 45,
+                "reasoning": {"enabled": False},
+            }
+            try:
+                async with self._ai_sem:
+                    data = await asyncio.to_thread(
+                        _gateway_request, "POST", "/chat/completions", api_key, payload, 45.0,
+                    )
+            except Exception:
+                return _local_question(language_name, own)
+            choice = (data.get("choices") or [{}])[0]
+            content = (choice.get("message") or {}).get("content")
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "") for b in content if isinstance(b, dict)
+                )
+            if isinstance(content, str):
+                cleaned = _clean_ai_text(content, 90)
+                if cleaned and not BAD_ROLE_RE.search(cleaned):
+                    return cleaned
+            return _local_question(language_name, own)
 
         def build_messages(limit: int, system_text: str) -> list[dict]:
             msgs = [{"role": "system", "content": system_text}]
