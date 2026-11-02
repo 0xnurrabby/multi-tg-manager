@@ -138,7 +138,7 @@ TOPICS = [
     "petty daily drama",
 ]
 
-REACTION_EMOJIS = ["❤️", "👍", "🔥", "😂", "🤔", "👏", "😮"]
+REACTION_EMOJIS = ["❤", "👍", "🔥", "😂", "🤔", "👏", "😮", "🎉", "😍"]
 
 TURN_STYLES = [
     "react to their last message and ask one thing",
@@ -260,8 +260,8 @@ def _gateway_request(method: str, path: str, api_key: str, payload: dict | None 
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "applipersonion/json",
-        "Accept": "applipersonion/json",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
     }
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
@@ -344,7 +344,7 @@ def _media_label(msg) -> str | None:
     if "Poll" in t:
         return "[poll]"
     if "Geo" in t:
-        return "[lopersonion]"
+        return "[location]"
     if "Contact" in t:
         return "[contact]"
     return "[media]"
@@ -406,7 +406,7 @@ class AIChatManager:
         self._state: dict[int, dict] = {}
         # AI calls are cheap but not free; this only limits simultaneous Gateway
         # calls. Every account still has its own task, profile and conversation.
-        self._ai_sem = asyncio.Semaphore(15)
+        self._ai_sem = asyncio.Semaphore(45)
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
         # Every account runs together, but messages leave at a steady pace so
@@ -564,7 +564,7 @@ class AIChatManager:
                     min_turns: int = 4, max_turns: int = 10,
                     fixed_target: int | None = None, skip_start: bool = False,
                     daily_sent: int = 0, daily_limit: int = 0,
-                    fill_daily: bool = False) -> bool:
+                    fill_daily: bool = False, stagger_max: float = 45.0) -> bool:
         aid = account.id
         if self.is_running(aid):
             return False
@@ -592,11 +592,14 @@ class AIChatManager:
             "last_error": "",
             "started_at": _now_iso(),
             "last_activity": _now_iso(),
+            "reaction_rate": random.uniform(0.10, 0.15),
+            "quote_rate": random.uniform(0.34, 0.52),
         }
         task = asyncio.create_task(
             self._run(
                 account, api_key, model, target, stop, profile, turn_target,
                 skip_start=skip_start, daily_sent=int(daily_sent or 0),
+                stagger_max=stagger_max,
             ),
             name=f"ai-chat-{aid}",
         )
@@ -651,10 +654,11 @@ class AIChatManager:
     # ---------- worker ----------
     async def _run(self, account: Account, api_key: str, model: str, target: str,
                    stop: asyncio.Event, profile: dict, turn_target: int,
-                   skip_start: bool = False, daily_sent: int = 0):
+                   skip_start: bool = False, daily_sent: int = 0,
+                   stagger_max: float = 45.0):
         aid = account.id
         self._set(aid, status="starting", last_activity=_now_iso())
-        await self._sleep_or_stop(stop, random.uniform(0, 45))
+        await self._sleep_or_stop(stop, random.uniform(0, max(1.0, float(stagger_max or 1.0))))
         if stop.is_set():
             self._set(aid, running=False, status="stopped", last_activity=_now_iso())
             return
@@ -715,6 +719,9 @@ class AIChatManager:
             no_reply_retries = 0
             limit_reached = False
             stop_note = ""
+            sent_window: list[float] = []
+            reaction_rate = float(self._state.get(aid, {}).get("reaction_rate") or 0.12)
+            quote_rate = float(self._state.get(aid, {}).get("quote_rate") or 0.4)
             while not stop.is_set():
                 if turns_done >= turn_target:
                     break
@@ -803,7 +810,8 @@ class AIChatManager:
                     if stop.is_set():
                         break
 
-                if last and last.direction == "bot" and last.tg_msg_id and random.random() < 0.18:
+                if (last and last.direction == "bot" and last.tg_msg_id
+                        and random.random() < reaction_rate):
                     emoji = random.choice(REACTION_EMOJIS)
                     if await self._react(cli, entity, last.tg_msg_id, emoji):
                         await self._set_reaction(aid, last.tg_msg_id, emoji)
@@ -843,22 +851,34 @@ class AIChatManager:
                 if stop.is_set():
                     break
 
-                # Sometimes quote the bot's last message, like a real reply.
-                quote = bool(last and last.direction == "bot" and last.tg_msg_id and random.random() < 0.34)
-                reply_to = last.tg_msg_id if quote else None
+                now = loop.time()
+                sent_window = [t for t in sent_window if now - t < 60]
+                if len(sent_window) >= 3:
+                    wait = 60 - (now - sent_window[0]) + random.uniform(1.5, 6.0)
+                    self._set(aid, status="waiting", last_activity=_now_iso())
+                    await self._sleep_or_stop(stop, wait)
+                    if stop.is_set():
+                        break
+                    sent_window = [t for t in sent_window if loop.time() - t < 60]
+
+                quote_msg = None
+                if last and last.direction == "bot" and last.tg_msg_id and random.random() < quote_rate:
+                    quote_msg = self._choose_quote(history, reply)
+                reply_to = quote_msg.tg_msg_id if quote_msg else None
                 try:
                     sent = await self._send_paced(cli, entity, reply, reply_to=reply_to, stop=stop)
                 except Exception:
                     # The quoted message may have been deleted; send plain text.
-                    quote = False
+                    quote_msg = None
                     sent = await self._send_paced(cli, entity, reply, stop=stop)
                 if sent is None:
                     break
+                sent_window.append(loop.time())
                 await self._persist(aid, "me", reply, sent.id,
-                                    reply_to_text=last.text if quote and last else None)
+                                    reply_to_text=quote_msg.text if quote_msg else None)
                 turns_done += 1
                 daily_sent += 1
-                next_send_at = loop.time() + random.uniform(12, 30)
+                next_send_at = 0.0
                 self._set(
                     aid, turns_done=turns_done, daily_sent=daily_sent,
                     status="waiting", last_activity=_now_iso(),
@@ -870,6 +890,7 @@ class AIChatManager:
                 if got:
                     bot_timeouts = 0
                     no_reply_retries = 0
+                    next_send_at = loop.time() + random.uniform(2.0, 12.0)
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
                     bot_timeouts += 1
@@ -928,6 +949,29 @@ class AIChatManager:
             self._last_send_at = loop.time()
             return sent
 
+    @staticmethod
+    def _choose_quote(history, reply: str):
+        candidates = [
+            m for m in history[-6:]
+            if m.direction == "bot" and m.tg_msg_id and (m.text or "").strip()
+        ]
+        if not candidates:
+            return None
+        words = {
+            w.strip(".,!?;:'\"()[]").lower()
+            for w in (reply or "").split()
+        }
+        words.discard("")
+
+        def overlap(m):
+            them = {
+                w.strip(".,!?;:'\"()[]").lower()
+                for w in (m.text or "").split()
+            }
+            return len(words & them)
+
+        return max(candidates, key=lambda m: (overlap(m), m.tg_msg_id or 0))
+
     async def _mark_read(self, cli, entity):
         try:
             await cli.send_read_acknowledge(entity)
@@ -942,7 +986,8 @@ class AIChatManager:
                 reaction=[ReactionEmoji(emoticon=emoji)],
             ))
             return True
-        except Exception:
+        except Exception as e:
+            log.warning("reaction failed for message %s: %s", msg_id, e)
             return False
 
     async def _set_reaction(self, account_id: int, tg_msg_id: int, emoji: str):
