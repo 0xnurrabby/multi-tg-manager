@@ -722,7 +722,6 @@ class AIChatManager:
             stop_note = ""
             sent_window: list[float] = []
             follow_up_pending = False
-            reply_target = 0.0
             reaction_rate = float(self._state.get(aid, {}).get("reaction_rate") or 0.12)
             quote_rate = float(self._state.get(aid, {}).get("quote_rate") or 0.4)
             while not stop.is_set():
@@ -746,18 +745,20 @@ class AIChatManager:
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     after = last.tg_msg_id or 0
                     got = await self._wait_for_bot(
-                        aid, cli, entity, after, stop, timeout=random.uniform(40, 55),
+                        aid, cli, entity, after, stop, timeout=(35 if no_reply_retries < 2 else 30),
                     )
                     if stop.is_set():
                         break
                     if not got:
                         no_reply_retries += 1
-                        if no_reply_retries > 8:
-                            stop_note = "no reply from the other person after retries. Paused for this run."
+                        if no_reply_retries > 2:
+                            await self._mark_limit_reached(aid)
+                            limit_reached = True
+                            stop_note = "No reply after retries. Treating this account as at today's limit."
                             break
                         force_first = True
                         follow_up_pending = True
-                        next_send_at = loop.time() + random.uniform(3, 8)
+                        next_send_at = loop.time() + random.uniform(0, 3)
                         self._set(
                             aid, status="cooldown",
                             last_error="no reply yet, sending a natural follow-up.",
@@ -766,7 +767,6 @@ class AIChatManager:
                         continue
                     bot_timeouts = 0
                     no_reply_retries = 0
-                    reply_target = loop.time() + random.uniform(10.0, 30.0)
                     next_send_at = 0.0
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
@@ -850,14 +850,14 @@ class AIChatManager:
                 if stop.is_set():
                     break
 
-                if reply_target > 0:
-                    remaining = reply_target - loop.time()
-                    if remaining > 0:
+                if last and last.direction == "bot" and last.created_at:
+                    target_age = random.uniform(10.0, 30.0)
+                    age = _message_age_seconds(last.created_at)
+                    if age < target_age:
                         self._set(aid, status="waiting", last_activity=_now_iso())
-                        await self._sleep_or_stop(stop, remaining)
+                        await self._sleep_or_stop(stop, target_age - age)
                         if stop.is_set():
                             break
-                    reply_target = 0.0
 
                 now = loop.time()
                 sent_window = [t for t in sent_window if now - t < 60]
@@ -894,24 +894,25 @@ class AIChatManager:
                 )
 
                 got = await self._wait_for_bot(
-                    aid, cli, entity, sent.id, stop, timeout=random.uniform(40, 55),
+                    aid, cli, entity, sent.id, stop, timeout=(35 if no_reply_retries < 2 else 30),
                 )
                 if stop.is_set():
                     break
                 if got:
                     bot_timeouts = 0
                     no_reply_retries = 0
-                    reply_target = loop.time() + random.uniform(10.0, 30.0)
                     next_send_at = 0.0
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
                     no_reply_retries += 1
-                    if no_reply_retries > 8:
-                        stop_note = "no reply from the other person after retries. Paused for this run."
+                    if no_reply_retries > 2:
+                        await self._mark_limit_reached(aid)
+                        limit_reached = True
+                        stop_note = "No reply after retries. Treating this account as at today's limit."
                         break
                     force_first = True
                     follow_up_pending = True
-                    next_send_at = loop.time() + random.uniform(3, 8)
+                    next_send_at = loop.time() + random.uniform(0, 3)
                     self._set(
                         aid, status="cooldown",
                         last_error="no reply yet, sending a natural follow-up.",
