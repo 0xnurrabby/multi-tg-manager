@@ -406,7 +406,7 @@ class AIChatManager:
         self._state: dict[int, dict] = {}
         # AI calls are cheap but not free; this only limits simultaneous Gateway
         # calls. Every account still has its own task, profile and conversation.
-        self._ai_sem = asyncio.Semaphore(80)
+        self._ai_sem = asyncio.Semaphore(250)
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
         # Every account runs together, but messages leave at a steady pace so
