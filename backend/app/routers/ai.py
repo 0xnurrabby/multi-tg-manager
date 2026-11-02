@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -305,7 +305,9 @@ async def send_custom_message(body: AiCustomIn, db: AsyncSession = Depends(get_d
 
 
 @router.post("/chat/start")
-async def start_chats(body: AiStartIn, db: AsyncSession = Depends(get_db)):
+async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depends(get_db)):
+    if request.headers.get("x-ai-manual") != "1":
+        raise HTTPException(403, "AI chat can only be started from the AI Chat screen button.")
     if not body.account_ids:
         raise HTTPException(400, "Pick at least one account")
     cfg = await ai_store.get_settings()

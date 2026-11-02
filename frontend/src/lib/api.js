@@ -4,7 +4,7 @@ const BASE = ''  // proxied by vite
 const _onUnauth = new Set()
 export function onUnauthorized(cb) { _onUnauth.add(cb); return () => _onUnauth.delete(cb) }
 
-async function request(method, path, { json, form, query, silent } = {}) {
+async function request(method, path, { json, form, query, silent, headers } = {}) {
   let url = path
   if (query) {
     const q = new URLSearchParams(
@@ -13,6 +13,7 @@ async function request(method, path, { json, form, query, silent } = {}) {
     if (q) url += '?' + q
   }
   const opts = { method, headers: {}, credentials: 'include' }
+  if (headers) Object.assign(opts.headers, headers)
   if (json !== undefined) {
     opts.headers['Content-Type'] = 'application/json'
     opts.body = JSON.stringify(json)
@@ -46,7 +47,7 @@ async function request(method, path, { json, form, query, silent } = {}) {
 
 export const api = {
   get:  (p, query)        => request('GET',  p, { query }),
-  post: (p, json)         => request('POST', p, { json }),
+  post: (p, json, headers) => request('POST', p, { json, headers }),
   put:  (p, json)         => request('PUT',  p, { json }),
   del:  (p)               => request('DELETE', p),
   postForm: (p, form)     => request('POST', p, { form }),
@@ -185,7 +186,7 @@ export const Endpoints = {
   clearAiKey: () => api.del('/api/ai/settings'),
   aiStatus: (limit = 30, includeMessages = true) => api.get('/api/ai/chat/status', { limit, include_messages: includeMessages }),
   aiDailyCounts: (accountIds) => api.post('/api/ai/chat/daily_counts', { account_ids: accountIds }),
-  startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }),
+  startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }, { 'X-AI-Manual': '1' }),
   sendAiCustom: (accountIds, message, onEvent) => streamNDJSON('/api/ai/chat/custom', { account_ids: accountIds, message }, onEvent),
   stopAiChats: (accountIds) => api.post('/api/ai/chat/stop', { account_ids: accountIds }),
 
