@@ -69,6 +69,17 @@ async def _migrate_sqlite(conn):
             "ALTER TABLE ai_chat_messages ADD COLUMN is_custom BOOLEAN DEFAULT 0"
         )
 
+    res = await conn.exec_driver_sql("PRAGMA table_info('accounts')")
+    account_cols = {row[1] for row in res.all()}
+    if "login_email_pattern" not in account_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE accounts ADD COLUMN login_email_pattern VARCHAR(255) DEFAULT ''"
+        )
+    if "email_checked_at" not in account_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE accounts ADD COLUMN email_checked_at DATETIME"
+        )
+
     res = await conn.exec_driver_sql("PRAGMA table_info('ai_chat_profiles')")
     prof_cols = {row[1] for row in res.all()}
     if "reset_at" not in prof_cols:

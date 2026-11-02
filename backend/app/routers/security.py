@@ -1,19 +1,25 @@
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from telethon.tl.functions.account import (
     GetAuthorizationsRequest, ResetAuthorizationRequest, GetPasswordRequest,
+    SendVerifyEmailCodeRequest, VerifyEmailRequest,
 )
+from telethon.tl.types import EmailVerifyPurposeLoginChange, EmailVerificationCode
 from telethon.errors import FloodWaitError, PasswordHashInvalidError
 from datetime import datetime
 
 from ..db import get_db, AsyncSessionLocal
 from ..models import SecurityMessage, Account
-from ..schemas import SecurityMessageOut, TgSessionOut, Bulk2faIn, PressServiceButtonIn
+from ..schemas import (
+    SecurityMessageOut, TgSessionOut, Bulk2faIn, PressServiceButtonIn,
+    EmailLoginSendIn, EmailLoginVerifyIn,
+)
 from ..tg_manager import manager
 from .. import secrets_store
-from ..utils import bulk_stream
+from ..utils import bulk_stream, friendly_error
 
 router = APIRouter(prefix="/api/security", tags=["security"])
 
@@ -181,6 +187,125 @@ async def bulk_2fa(body: Bulk2faIn, db: AsyncSession = Depends(get_db)):
         raise ValueError(f"None of your {tried} current password(s) worked for this account")
 
     return StreamingResponse(bulk_stream(accounts, _change), media_type="application/x-ndjson")
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+async def _refresh_email_status(cli, account_id: int):
+    pw = await cli(GetPasswordRequest())
+    pattern = (getattr(pw, "login_email_pattern", "") or "").strip()
+    has_2fa = bool(getattr(pw, "has_password", False))
+    checked = datetime.utcnow()
+    async with AsyncSessionLocal() as s:
+        acc = await s.get(Account, account_id)
+        if acc:
+            acc.login_email_pattern = pattern
+            acc.has_2fa = has_2fa
+            acc.email_checked_at = checked
+            await s.commit()
+    return pattern, has_2fa, checked
+
+
+@router.post("/email/scan")
+async def scan_login_emails(db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(Account).where(Account.status != "banned").order_by(Account.id)
+    )
+    accounts = [
+        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+        for a in res.scalars().all()
+    ]
+
+    async def _check(cli, aid):
+        pattern, has_2fa, _ = await _refresh_email_status(cli, aid)
+        email = pattern or "no email"
+        return "ok", f"{email} - 2FA {'on' if has_2fa else 'off'}"
+
+    return StreamingResponse(
+        bulk_stream(accounts, _check, concurrency=8),
+        media_type="application/x-ndjson",
+    )
+
+
+@router.post("/email/{account_id}/check")
+async def check_login_email(account_id: int):
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(400, "Account is not connected")
+    try:
+        pattern, has_2fa, checked = await _refresh_email_status(cli, account_id)
+    except FloodWaitError as e:
+        raise HTTPException(429, f"Rate limited - wait {e.seconds}s") from None
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e)) from None
+    return {
+        "login_email_pattern": pattern,
+        "has_email": bool(pattern),
+        "has_2fa": has_2fa,
+        "checked_at": checked,
+    }
+
+
+@router.post("/email/{account_id}/send_code")
+async def send_login_email_code(account_id: int, body: EmailLoginSendIn):
+    email = (body.email or "").strip()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(400, "Enter a valid email address")
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(400, "Account is not connected")
+    try:
+        sent = await cli(SendVerifyEmailCodeRequest(
+            EmailVerifyPurposeLoginChange(), email,
+        ))
+    except FloodWaitError as e:
+        raise HTTPException(429, f"Rate limited - wait {e.seconds}s") from None
+    except Exception as e:
+        message = friendly_error(e)
+        if "EMAIL_NOT_SETUP" in str(e).upper():
+            message = (
+                "This account has no login email yet. Telegram requires setting "
+                "one in the Telegram app before it can be changed."
+            )
+        raise HTTPException(400, message) from None
+    return {
+        "email": email,
+        "email_pattern": sent.email_pattern,
+        "length": sent.length,
+    }
+
+
+@router.post("/email/{account_id}/verify")
+async def verify_login_email_code(account_id: int, body: EmailLoginVerifyIn):
+    email = (body.email or "").strip()
+    code = (body.code or "").strip()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(400, "Enter a valid email address")
+    if not code:
+        raise HTTPException(400, "Enter the code from the new email")
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(400, "Account is not connected")
+    try:
+        verified = await cli(VerifyEmailRequest(
+            EmailVerifyPurposeLoginChange(), EmailVerificationCode(code),
+        ))
+    except FloodWaitError as e:
+        raise HTTPException(429, f"Rate limited - wait {e.seconds}s") from None
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e)) from None
+    try:
+        pattern, has_2fa, checked = await _refresh_email_status(cli, account_id)
+    except Exception:
+        pattern, has_2fa, checked = email, False, datetime.utcnow()
+    return {
+        "email": getattr(verified, "email", email),
+        "login_email_pattern": pattern,
+        "has_email": bool(pattern),
+        "has_2fa": has_2fa,
+        "checked_at": checked,
+    }
 
 
 async def _terminate_other_authorizations(cli) -> tuple[int, int]:

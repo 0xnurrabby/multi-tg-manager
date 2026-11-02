@@ -52,7 +52,7 @@ export default function App() {
   const [authState, setAuthState] = useState('checking') // checking | in | out
   const [accounts, setAccounts] = useState([])
   const [gone, setGone] = useState([])  // banned/removed account history
-  const [stats, setStats] = useState({ total: 0, connected: 0, banned: 0, with_2fa: 0, unread_security: 0 })
+  const [stats, setStats] = useState({ total: 0, connected: 0, banned: 0, with_2fa: 0, with_email: 0, unread_security: 0 })
   const [selectedId, setSelectedId] = useState(null)
   const [tab, setTab] = useState('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === 'undefined' ? true : window.innerWidth > 1024))

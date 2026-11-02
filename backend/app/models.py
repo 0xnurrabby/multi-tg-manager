@@ -17,6 +17,8 @@ class Account(Base):
     session_file: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(16), default="disconnected")  # connected/disconnected/banned
     has_2fa: Mapped[bool] = mapped_column(Boolean, default=False)
+    login_email_pattern: Mapped[str] = mapped_column(String(255), default="")
+    email_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=False)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

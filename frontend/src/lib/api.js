@@ -174,6 +174,11 @@ export const Endpoints = {
   twofaKnown: () => api.get('/api/security/twofa_known'),
   bulk2fa: (payload, onEvent) => streamNDJSON('/api/security/bulk_2fa', payload, onEvent),
 
+  emailScan: (onEvent) => streamNDJSON('/api/security/email/scan', {}, onEvent),
+  emailCheck: (id) => api.post(`/api/security/email/${id}/check`),
+  emailSendCode: (id, email) => api.post(`/api/security/email/${id}/send_code`, { email }),
+  emailVerify: (id, email, code) => api.post(`/api/security/email/${id}/verify`, { email, code }),
+
   // AI chats with the target bot, one independent conversation per account
   aiSettings: () => api.get('/api/ai/settings'),
   saveAiSettings: (payload) => api.put('/api/ai/settings', payload),

@@ -20,6 +20,7 @@ export default function TopStats({ stats, onBellClick }) {
       <Chip label="Connected" value={stats.connected} accent="--accent-mint" />
       <Chip label="Banned" value={stats.banned} accent="--accent-rose" />
       <Chip label="2FA" value={stats.with_2fa} accent="--accent-sky" />
+      <Chip label="Email" value={stats.with_email ?? 0} accent="--accent-mint" />
       <button
         onClick={onBellClick}
         className="stat-chip transition-colors hover:border-[color:var(--hairline-strong)]"

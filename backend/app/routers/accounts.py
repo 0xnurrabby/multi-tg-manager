@@ -37,6 +37,8 @@ async def _account_to_out(acc: Account, db: AsyncSession) -> AccountOut:
         bio=acc.bio,
         status=acc.status,
         has_2fa=acc.has_2fa,
+        login_email_pattern=acc.login_email_pattern or "",
+        email_checked_at=acc.email_checked_at,
         is_online=acc.is_online,
         last_seen=acc.last_seen,
         unread_security=unread or 0,
@@ -54,6 +56,8 @@ def _account_fallback(acc: Account) -> AccountOut:
         bio=acc.bio,
         status=acc.status,
         has_2fa=acc.has_2fa,
+        login_email_pattern=acc.login_email_pattern or "",
+        email_checked_at=acc.email_checked_at,
         is_online=acc.is_online,
         last_seen=acc.last_seen,
         unread_security=0,
@@ -138,8 +142,17 @@ async def stats(db: AsyncSession = Depends(get_db)):
     connected = await db.scalar(select(func.count(Account.id)).where(Account.status == "connected")) or 0
     banned = await db.scalar(select(func.count(Account.id)).where(Account.status == "banned")) or 0
     with_2fa = await db.scalar(select(func.count(Account.id)).where(Account.has_2fa == True)) or 0  # noqa: E712
+    with_email = await db.scalar(
+        select(func.count(Account.id)).where(
+            Account.login_email_pattern.is_not(None),
+            Account.login_email_pattern != "",
+        )
+    ) or 0
     unread = await db.scalar(select(func.count(SecurityMessage.id)).where(SecurityMessage.is_read == False)) or 0  # noqa: E712
-    return StatsOut(total=total, connected=connected, banned=banned, with_2fa=with_2fa, unread_security=unread)
+    return StatsOut(
+        total=total, connected=connected, banned=banned, with_2fa=with_2fa,
+        with_email=with_email, unread_security=unread,
+    )
 
 
 # ----- Auth -----

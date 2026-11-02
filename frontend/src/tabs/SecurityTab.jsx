@@ -283,6 +283,10 @@ function Bulk2faPanel({ accounts, onChange }) {
   }, [open])
 
   const allChecked = ids.length === accounts.length && accounts.length > 0
+  const no2fa = accounts.filter((a) => !a.has_2fa)
+  const selectedAccounts = accounts.filter((a) => ids.includes(a.id))
+  const allNo2fa = ids.length > 0 && selectedAccounts.every((a) => !a.has_2fa)
+  const anyWith2fa = selectedAccounts.some((a) => a.has_2fa)
   const toggleAll = () => setIds(allChecked ? [] : accounts.map((a) => a.id))
   const toggle = (id) => setIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
 
@@ -300,9 +304,11 @@ function Bulk2faPanel({ accounts, onChange }) {
     if (!newPwd) { toast.error('Enter the new 2FA password'); return }
     if (newPwd.trim() !== newPwd2.trim()) { toast.error('New passwords do not match'); return }
     if (!confirm(
-      `Set/change the Two-Step password on ${ids.length} account(s)?\n\n` +
-      `For accounts that already have 2FA, your remembered passwords` +
-      `${bank.length ? ` and ${bank.length} entered password(s)` : ''} are tried (up to 5 per account).`
+      allNo2fa
+        ? `Add 2FA to ${ids.length} account(s) that currently have no 2FA?\n\nNo current password is needed for these accounts.`
+        : `Set/change the Two-Step password on ${ids.length} account(s)?\n\n` +
+          `For accounts that already have 2FA, your remembered passwords` +
+          `${bank.length ? ` and ${bank.length} entered password(s)` : ''} are tried (up to 5 per account).`
     )) return
     setBusy(true)
     await run(`Bulk 2FA — ${ids.length} account(s)`, (onEvent) =>
@@ -357,6 +363,7 @@ function Bulk2faPanel({ accounts, onChange }) {
           </div>
 
           {/* current-password attempt bank */}
+          {anyWith2fa && (
           <div className="nb-card-sm p-3">
             <div className="micro-label mb-2">Current passwords to try, max 5</div>
             <div className="text-[11px] text-muted mb-3">
@@ -379,12 +386,26 @@ function Bulk2faPanel({ accounts, onChange }) {
               ))}
             </div>
           </div>
+          )}
+
+          {allNo2fa && (
+            <div className="nb-note nb-note-info px-3 py-2 text-sm">
+              All selected accounts have 2FA off, so no current password is needed.
+            </div>
+          )}
 
           {/* account picker */}
           <div className="nb-card-sm p-3">
             <div className="flex items-center gap-2 mb-2">
               <span className="micro-label">Accounts</span>
               <button className="nb-btn !py-0.5 !px-2 text-[11px]" onClick={toggleAll}>{allChecked ? 'Clear' : 'Select all'}</button>
+              <button
+                className="nb-btn !py-0.5 !px-2 text-[11px]"
+                disabled={no2fa.length === 0}
+                onClick={() => setIds(no2fa.map((a) => a.id))}
+              >
+                Select without 2FA ({no2fa.length})
+              </button>
               <span className="text-xs opacity-70 ml-auto">{ids.length} selected</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-48 overflow-auto pr-1">
@@ -406,10 +427,242 @@ function Bulk2faPanel({ accounts, onChange }) {
           </div>
 
           <button className="nb-btn-pri w-full" disabled={busy} onClick={start}>
-            {busy ? 'Working…' : `Change 2FA on ${ids.length} account${ids.length === 1 ? '' : 's'}`}
+            {busy ? 'Working...' : `${allNo2fa ? 'Add 2FA to' : 'Change 2FA on'} ${ids.length} account${ids.length === 1 ? '' : 's'}`}
           </button>
         </div>
       )}
+
+      <ProgressModal progress={progress} onClose={close} />
+    </div>
+  )
+}
+
+function EmailLoginPanel({ accounts, selected, onChange }) {
+  const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
+  const [scanBusy, setScanBusy] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [step, setStep] = useState('email')
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [sentPattern, setSentPattern] = useState('')
+  const [codeLength, setCodeLength] = useState(0)
+  const [busy, setBusy] = useState(false)
+
+  const checked = accounts.filter((a) => !!a.email_checked_at)
+  const withEmail = checked.filter((a) => !!(a.login_email_pattern || '').trim()).length
+  const withoutEmail = checked.length - withEmail
+  const unknown = accounts.length - checked.length
+  const currentEmail = (selected?.login_email_pattern || '').trim()
+  const known = !!selected?.email_checked_at
+  const hasEmail = !!currentEmail
+
+  useEffect(() => {
+    setStep('email')
+    setEmail('')
+    setCode('')
+    setSentPattern('')
+    setCodeLength(0)
+  }, [selected?.id])
+
+  useEffect(() => {
+    if (!selected || selected.status !== 'connected' || selected.email_checked_at) return
+    let alive = true
+    setChecking(true)
+    Endpoints.emailCheck(selected.id)
+      .then(() => { if (alive) onChange?.() })
+      .catch((e) => { if (alive) toast.error(e.message) })
+      .finally(() => { if (alive) setChecking(false) })
+    return () => { alive = false }
+  }, [selected?.id, selected?.status, selected?.email_checked_at])
+
+  async function checkSelected() {
+    if (!selected) return
+    setChecking(true)
+    try {
+      await Endpoints.emailCheck(selected.id)
+      await onChange?.()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  async function scanAll() {
+    if (accounts.length === 0) return
+    setScanBusy(true)
+    await run(`Email login status - ${accounts.length} accounts`, (onEvent) =>
+      Endpoints.emailScan(onEvent))
+    setScanBusy(false)
+    onChange?.()
+  }
+
+  async function sendCode() {
+    if (!selected) return
+    const value = email.trim()
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
+      toast.error('Enter a valid email address')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await Endpoints.emailSendCode(selected.id, value)
+      setSentPattern(r.email_pattern || value)
+      setCodeLength(r.length || 0)
+      setCode('')
+      setStep('code')
+      toast.success('Verification code sent to the new email')
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function verifyCode() {
+    if (!selected) return
+    const value = code.trim()
+    if (!value) {
+      toast.error('Enter the code from the new email')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await Endpoints.emailVerify(selected.id, email.trim(), value)
+      toast.success(`Login email changed to ${r.email || email.trim()}`)
+      setStep('email')
+      setEmail('')
+      setCode('')
+      setSentPattern('')
+      setCodeLength(0)
+      await onChange?.()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const name = selected
+    ? (((selected.first_name || '') + ' ' + (selected.last_name || '')).trim() || selected.phone)
+    : ''
+
+  return (
+    <div className="nb-card p-5 mb-4">
+      <div className="flex items-start sm:items-center gap-3 flex-col sm:flex-row">
+        <div>
+          <div className="micro-label">Account email</div>
+          <div className="display-title text-[20px] mt-1">Email login</div>
+        </div>
+        <span className="nb-badge bg-brand-info">Telegram login email</span>
+        <button className="nb-btn w-full sm:w-auto sm:ml-auto !py-1 !px-3 text-xs"
+          disabled={scanBusy || accounts.length === 0} onClick={scanAll}>
+          {scanBusy ? 'Checking...' : 'Check all statuses'}
+        </button>
+      </div>
+
+      <div className="text-sm text-muted leading-6 mt-2">
+        Shows how many accounts have a Telegram login email. Select an account from
+        the sidebar, then change its email with a verification code sent to the new
+        address. No 2FA password is needed for this.
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 mt-3">
+        <div className="nb-card-sm p-3">
+          <div className="micro-label">With email</div>
+          <div className="display-title text-[22px] mt-1">{withEmail}</div>
+        </div>
+        <div className="nb-card-sm p-3">
+          <div className="micro-label">Without email</div>
+          <div className="display-title text-[22px] mt-1">{withoutEmail}</div>
+        </div>
+        <div className="nb-card-sm p-3">
+          <div className="micro-label">Not checked</div>
+          <div className="display-title text-[22px] mt-1">{unknown}</div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        {!selected && (
+          <div className="nb-note nb-note-info px-3 py-2 text-sm">
+            Choose an account from the sidebar to change its login email.
+          </div>
+        )}
+
+        {selected && (
+          <div className="nb-card-sm p-4">
+            <div className="flex items-start gap-3 flex-col sm:flex-row">
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{name}</div>
+                <div className="font-mono text-[11px] text-muted mt-0.5">{selected.phone}</div>
+              </div>
+              <div className="sm:ml-auto text-left sm:text-right">
+                <div className="micro-label">Current login email</div>
+                <div className="font-mono text-xs mt-1">
+                  {known
+                    ? (hasEmail ? currentEmail : 'Not set')
+                    : (checking ? 'Checking...' : 'Not checked')}
+                </div>
+              </div>
+              <button className="nb-btn !py-1 !px-3 text-xs"
+                disabled={checking || selected.status !== 'connected'} onClick={checkSelected}>
+                {checking ? 'Checking...' : 'Check'}
+              </button>
+            </div>
+
+            {known && !hasEmail && (
+              <div className="nb-note nb-note-warn px-3 py-2 text-sm mt-3">
+                This account has no login email. Telegram only allows changing an
+                existing login email, so set one in the Telegram app first.
+              </div>
+            )}
+
+            {known && hasEmail && (
+              <div className="mt-3 space-y-3">
+                {step === 'email' && (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      className="nb-input flex-1"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="new email address"
+                    />
+                    <button className="nb-btn-pri !px-4" disabled={busy} onClick={sendCode}>
+                      {busy ? 'Sending...' : 'Send code'}
+                    </button>
+                  </div>
+                )}
+
+                {step === 'code' && (
+                  <div className="space-y-2">
+                    <div className="nb-note nb-note-info px-3 py-2 text-sm">
+                      Code sent to {sentPattern || email.trim()}
+                      {codeLength ? ` (${codeLength} digits)` : ''}.
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        className="nb-input flex-1"
+                        inputMode="numeric"
+                        value={code}
+                        onChange={(e) => setCode(e.target.value)}
+                        placeholder="code from the new email"
+                      />
+                      <button className="nb-btn-pri !px-4" disabled={busy} onClick={verifyCode}>
+                        {busy ? 'Verifying...' : 'Verify and change'}
+                      </button>
+                      <button className="nb-btn !px-4" disabled={busy} onClick={() => setStep('email')}>
+                        Back
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       <ProgressModal progress={progress} onClose={close} />
     </div>
@@ -478,6 +731,7 @@ export default function SecurityTab({ accounts, focusAlert, focusAccountId, focu
 
       <BulkTerminateSessionsPanel accounts={accounts} onChange={onChange} />
       <Bulk2faPanel accounts={accounts} onChange={onChange} />
+      <EmailLoginPanel accounts={accounts} selected={selected} onChange={onChange} />
 
       {!selected && (
         <div className="empty-state">

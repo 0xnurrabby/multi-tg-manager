@@ -13,6 +13,8 @@ class AccountOut(BaseModel):
     bio: str = ""
     status: str
     has_2fa: bool
+    login_email_pattern: str = ""
+    email_checked_at: Optional[datetime] = None
     is_online: bool
     last_seen: Optional[datetime] = None
     unread_security: int = 0
@@ -42,6 +44,7 @@ class StatsOut(BaseModel):
     connected: int
     banned: int
     with_2fa: int
+    with_email: int = 0
     unread_security: int
 
 
@@ -261,6 +264,15 @@ class Bulk2faIn(BaseModel):
     # Current-password attempt bank (max 5). Tried in order, after each account's
     # own remembered password, until one is accepted (5 tries max per account).
     password_bank: list[str] = Field(default_factory=list)
+
+
+class EmailLoginSendIn(BaseModel):
+    email: str
+
+
+class EmailLoginVerifyIn(BaseModel):
+    email: str
+    code: str
 
 
 class SettingsIn(BaseModel):
