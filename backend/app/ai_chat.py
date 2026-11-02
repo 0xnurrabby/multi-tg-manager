@@ -406,7 +406,7 @@ class AIChatManager:
         self._state: dict[int, dict] = {}
         # AI calls are cheap but not free; this only limits simultaneous Gateway
         # calls. Every account still has its own task, profile and conversation.
-        self._ai_sem = asyncio.Semaphore(45)
+        self._ai_sem = asyncio.Semaphore(80)
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
         # Every account runs together, but messages leave at a steady pace so
@@ -658,7 +658,8 @@ class AIChatManager:
                    stagger_max: float = 45.0):
         aid = account.id
         self._set(aid, status="starting", last_activity=_now_iso())
-        await self._sleep_or_stop(stop, random.uniform(0, max(1.0, float(stagger_max or 1.0))))
+        if stagger_max and stagger_max > 0:
+            await self._sleep_or_stop(stop, random.uniform(0, float(stagger_max)))
         if stop.is_set():
             self._set(aid, running=False, status="stopped", last_activity=_now_iso())
             return
@@ -674,7 +675,7 @@ class AIChatManager:
         name = (account.first_name or "").strip() or f"user {aid}"
         turns_done = 0
         loop = asyncio.get_running_loop()
-        next_send_at = loop.time() + random.uniform(10, 25)
+        next_send_at = loop.time()
         try:
             cli = manager.get(aid)
             if not cli or not cli.is_connected():
@@ -711,7 +712,7 @@ class AIChatManager:
                     # reply. Waiting for a reply to that old message is what made
                     # fill jobs sit forever, so start a fresh turn instead.
                     force_first = True
-                    next_send_at = loop.time() + random.uniform(5, 12)
+                    next_send_at = loop.time()
                     self._set(aid, status="starting", last_error="", last_activity=_now_iso())
 
             consecutive_errors = 0
@@ -721,6 +722,7 @@ class AIChatManager:
             stop_note = ""
             sent_window: list[float] = []
             follow_up_pending = False
+            reply_target = 0.0
             reaction_rate = float(self._state.get(aid, {}).get("reaction_rate") or 0.12)
             quote_rate = float(self._state.get(aid, {}).get("quote_rate") or 0.4)
             while not stop.is_set():
@@ -764,6 +766,8 @@ class AIChatManager:
                         continue
                     bot_timeouts = 0
                     no_reply_retries = 0
+                    reply_target = loop.time() + random.uniform(10.0, 30.0)
+                    next_send_at = 0.0
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
                     if not last:
@@ -777,9 +781,6 @@ class AIChatManager:
                     force_first = False
                     if skip_start and not follow_up_pending:
                         self._set(aid, status="starting", last_error="", last_activity=_now_iso())
-                        await self._sleep_or_stop(stop, random.uniform(5, 12))
-                        if stop.is_set():
-                            break
                 else:
                     # Human gap between messages. The bot may send more while we wait.
                     wait = next_send_at - loop.time()
@@ -849,6 +850,15 @@ class AIChatManager:
                 if stop.is_set():
                     break
 
+                if reply_target > 0:
+                    remaining = reply_target - loop.time()
+                    if remaining > 0:
+                        self._set(aid, status="waiting", last_activity=_now_iso())
+                        await self._sleep_or_stop(stop, remaining)
+                        if stop.is_set():
+                            break
+                    reply_target = 0.0
+
                 now = loop.time()
                 sent_window = [t for t in sent_window if now - t < 60]
                 if len(sent_window) >= 3:
@@ -891,7 +901,8 @@ class AIChatManager:
                 if got:
                     bot_timeouts = 0
                     no_reply_retries = 0
-                    next_send_at = loop.time() + random.uniform(2.0, 12.0)
+                    reply_target = loop.time() + random.uniform(10.0, 30.0)
+                    next_send_at = 0.0
                     await self._sleep_or_stop(stop, random.uniform(0.8, 1.8))
                 else:
                     no_reply_retries += 1
@@ -934,7 +945,7 @@ class AIChatManager:
         async with self._send_lock:
             if stop is not None and stop.is_set():
                 return None
-            wait = self._last_send_at + 0.2 - loop.time()
+            wait = self._last_send_at + 0.1 - loop.time()
             if wait > 0:
                 await asyncio.sleep(wait)
             if stop is not None and stop.is_set():
