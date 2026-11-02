@@ -501,7 +501,7 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
   function emailErrorMessage(e) {
     const msg = String(e?.message || '')
     if (msg.includes('EMAIL_NOT_ALLOWED')) {
-      return 'Telegram rejected this email address. Use a normal email (Gmail, Outlook, or a real domain), not a temporary or disposable one.'
+      return 'Telegram rejected this email. It may already be linked to another Telegram account, or this email/alias is not allowed. Try a different email address.'
     }
     if (msg.includes('EMAIL_NOT_SETUP')) {
       return 'This account has no login email yet. Telegram requires setting one in the Telegram app first.'
@@ -655,7 +655,7 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
                       </button>
                     </div>
                     <div className="text-[10px] text-muted">
-                      Use a real email. Telegram rejects temporary or disposable domains (EMAIL_NOT_ALLOWED).
+                      Telegram limits reusing the same login email across accounts. Gmail dot aliases may count as the same mailbox.
                     </div>
                   </>
                 )}

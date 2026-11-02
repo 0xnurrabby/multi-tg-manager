@@ -196,8 +196,9 @@ def _email_error_text(e: Exception) -> str:
     raw = str(e).upper()
     if "EMAIL_NOT_ALLOWED" in raw:
         return (
-            "Telegram rejected this email address. Use a normal email (Gmail, "
-            "Outlook, or a real domain), not a temporary or disposable one."
+            "Telegram rejected this email. It may already be linked to another "
+            "Telegram account, or this email/alias is not allowed. Try a "
+            "different email address."
         )
     if "EMAIL_NOT_SETUP" in raw:
         return (
