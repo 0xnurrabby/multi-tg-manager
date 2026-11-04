@@ -433,7 +433,7 @@ class TgClientManager:
         async def _start_one(acc: Account):
             async with sem:
                 try:
-                    await self.start_client(acc)
+                    await self.start_client(acc, sync_profile=False)
                 except Exception as e:
                     log.warning("Failed to start client for %s: %s", acc.phone, e)
 
@@ -473,7 +473,7 @@ class TgClientManager:
         self._pending.clear()
         self._qr_pending.clear()
 
-    async def start_client(self, acc: Account) -> TelegramClient:
+    async def start_client(self, acc: Account, sync_profile: bool = True) -> TelegramClient:
         lock = await self._acc_lock(acc.id)
         async with lock:
             if acc.id in self._clients:
@@ -488,11 +488,12 @@ class TgClientManager:
             self._attach_listener(acc.id, cli)
             await self._set_status(acc.id, "connected")
             # sync profile
-            try:
-                me = await cli.get_me()
-                await self._sync_profile(acc.id, me)
-            except Exception:
-                pass
+            if sync_profile:
+                try:
+                    me = await cli.get_me()
+                    await self._sync_profile(acc.id, me)
+                except Exception:
+                    pass
             # backfill recent 777000 messages we may have missed while offline
             try:
                 await self._backfill_777000(acc.id, cli, limit=50)

@@ -29,7 +29,9 @@ async def lifespan(app: FastAPI):
         log.warning("SESSION_SECRET is missing or too short — set it in backend/.env!")
     await init_db()
     manager.set_loop(asyncio.get_event_loop())
-    await manager.startup_load_all()
+    # Do not make the web UI wait for 300 Telegram clients. Serve immediately
+    # and connect accounts in the background.
+    load_task = asyncio.create_task(manager.startup_load_all())
     await tunnel_manager.start()
 
     async def status_loop():
@@ -44,6 +46,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         task.cancel()
+        if load_task and not load_task.done():
+            load_task.cancel()
         await tunnel_manager.stop()
         await ai_manager.shutdown()
         await manager.shutdown()
