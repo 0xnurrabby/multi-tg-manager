@@ -16,6 +16,16 @@ function fmtClock(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function fmtDuration(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const sec = total % 60
+  if (h) return `${h}h ${m}m ${sec}s`
+  if (m) return `${m}m ${sec}s`
+  return `${sec}s`
+}
+
 function statusMeta(chat) {
   if (chat.status === 'limit') return { label: 'Limit reached', color: 'rgb(var(--accent-rose))' }
   if (chat.status === 'error') return { label: 'Error', color: 'rgb(var(--accent-rose))' }
@@ -135,6 +145,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const customLiveUntil = useRef(0)
   const [settings, setSettings] = useState(null)
   const [status, setStatus] = useState(null)
+  const [clock, setClock] = useState(Date.now())
   const [selected, setSelected] = useState([])
   const [search, setSearch] = useState('')
   const [keyInput, setKeyInput] = useState('')
@@ -178,6 +189,11 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     } catch {
       return null
     }
+  }, [])
+
+  useEffect(() => {
+    const id = setInterval(() => setClock(Date.now()), 1000)
+    return () => clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -505,6 +521,19 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
   const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
   const limitCount = allChats.filter((c) => c.status === 'limit').length
+  const finishAt = status?.finish_at ? new Date(status.finish_at) : null
+  const finishIn = finishAt ? Math.max(0, Math.floor((finishAt.getTime() - clock) / 1000)) : 0
+  const finishBd = finishAt
+    ? new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'short',
+      }).format(finishAt)
+    : ''
+  const finishReason = status?.finish_reason || 'idle'
+  const finishTitle =
+    finishReason === 'done' ? 'Done'
+      : finishReason === 'idle' ? 'Not running'
+        : finishReason === 'calculating' ? 'Calculating...'
+          : fmtDuration(finishIn)
 
   return (
     <div className="space-y-5">
@@ -780,6 +809,23 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="flex justify-between gap-2"><span>At 100 messages</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Bot limit reached</span><span className="font-mono text-ink">{limitCount} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">6:00 AM Bangladesh</span></div>
+          </div>
+          <div className="mt-4 pt-3 border-t border-[color:var(--hairline)]">
+            <div className="micro-label">Estimated work finish</div>
+            <div className="display-title text-[26px] mt-1 tabular-nums">{finishTitle}</div>
+            {finishAt && finishReason !== 'done' && (
+              <div className="text-[11px] text-muted mt-1">
+                BD time: <span className="font-mono text-ink">{finishBd}</span>
+              </div>
+            )}
+            <div className="text-[10px] text-muted font-mono mt-1">
+              {status?.remaining_messages ?? 0} messages remaining ? {status?.rate_per_min ?? 0}/min
+            </div>
+            {finishReason === 'reset' && (
+              <div className="text-[10px] text-muted mt-1">
+                Daily reset 6:00 AM ? full limit may not finish today.
+              </div>
+            )}
           </div>
           <div className="text-[10px] text-muted mt-4 leading-5">
             Each account has its own style and its own history. Stopping one account does not affect the others. Chats use your AI Gateway credits while running.

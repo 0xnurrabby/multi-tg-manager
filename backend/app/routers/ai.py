@@ -1,10 +1,11 @@
 from __future__ import annotations
 import asyncio
 import re
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -148,6 +149,16 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
     ids = set(state.keys()) | set(profiles.keys())
     ids &= set(accounts.keys())
     today = bd_day_key()
+    recent_cutoff = datetime.utcnow() - timedelta(minutes=10)
+    res = await db.execute(
+        select(AiChatMessage.account_id, func.count(AiChatMessage.id))
+        .where(
+            AiChatMessage.direction == "me",
+            AiChatMessage.created_at >= recent_cutoff,
+        )
+        .group_by(AiChatMessage.account_id)
+    )
+    recent_counts = {aid: count for aid, count in res.all()}
 
     out = []
     for aid in ids:
@@ -204,6 +215,46 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
             "messages": msgs,
         })
 
+    for chat in out:
+        remaining = max(0, int(chat["daily_limit"]) - int(chat["daily_sent"]))
+        rate = recent_counts.get(chat["account_id"], 0) / 10.0
+        chat["remaining_messages"] = remaining
+        chat["rate_per_min"] = round(rate, 2)
+        if chat["status"] == "limit" or remaining <= 0:
+            chat["eta_seconds"] = 0
+        elif not chat["running"]:
+            chat["eta_seconds"] = None
+        elif rate > 0:
+            chat["eta_seconds"] = int(remaining / rate * 60)
+        else:
+            chat["eta_seconds"] = None
+
+    active_chats = [c for c in out if c["running"]]
+    now = datetime.now(timezone.utc)
+    reset = daily_reset_utc()
+    remaining_total = sum(c["remaining_messages"] for c in active_chats)
+    rate_total = round(sum(c["rate_per_min"] for c in active_chats), 2)
+    known_etas = [c["eta_seconds"] for c in active_chats if c["eta_seconds"] is not None]
+    finish_at = None
+    finish_in = 0
+    finish_reason = "idle"
+    if active_chats:
+        if all(c["remaining_messages"] <= 0 for c in active_chats):
+            finish_reason = "done"
+            finish_at = now
+        elif known_etas:
+            max_eta = max(known_etas)
+            estimated = now + timedelta(seconds=max_eta)
+            if estimated > reset:
+                estimated = reset
+                finish_reason = "reset"
+            else:
+                finish_reason = "limit"
+            finish_at = estimated
+            finish_in = max(0, int((estimated - now).total_seconds()))
+        else:
+            finish_reason = "calculating"
+
     # Running first, then latest activity.
     out.sort(key=lambda x: (1 if x["running"] else 0, str(x.get("last_activity") or "")), reverse=True)
 
@@ -219,6 +270,13 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
         "active": len(ai_manager.active_ids()),
         "queued": queued,
         "accounts": out,
+        "finish_at": finish_at.isoformat() if finish_at else None,
+        "finish_in_seconds": finish_in,
+        "finish_reason": finish_reason,
+        "remaining_messages": remaining_total,
+        "rate_per_min": rate_total,
+        "accounts_at_limit": sum(1 for c in out if c["status"] == "limit"),
+        "reset_at": reset.isoformat(),
     }
 
 
