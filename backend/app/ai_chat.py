@@ -38,7 +38,8 @@ GATEWAY_PROVIDER_OPTIONS = {
     }
 }
 DAILY_LIMIT = 100
-DIRECT_MODE = True
+DIRECT_MODE = False
+FAST_DELAYS = True
 BD_TZ = timezone(timedelta(hours=6), "Asia/Dhaka")
 
 
@@ -820,13 +821,13 @@ class AIChatManager:
                 # Read the reply and pause like a person before answering.
                 self._set(aid, status="reading", last_error="", last_activity=_now_iso())
                 await self._mark_read(cli, entity)
-                if DIRECT_MODE:
+                if FAST_DELAYS:
                     await self._sleep_or_stop(stop, random.uniform(0.1, 0.4))
                 else:
                     await self._sleep_or_stop(stop, random.uniform(1.0, 3.0))
                 if stop.is_set():
                     break
-                if not DIRECT_MODE and random.random() < 0.05:
+                if not FAST_DELAYS and random.random() < 0.05:
                     await self._sleep_or_stop(stop, random.uniform(3.0, 8.0))
                     if stop.is_set():
                         break
@@ -869,7 +870,7 @@ class AIChatManager:
                     continue
 
                 self._set(aid, status="typing", last_error="", last_activity=_now_iso())
-                if DIRECT_MODE:
+                if FAST_DELAYS:
                     await self._sleep_or_stop(stop, random.uniform(0.2, 0.8))
                 else:
                     await self._human_delay(cli, entity, stop, reply, length_mode)
@@ -877,7 +878,7 @@ class AIChatManager:
                     break
 
                 if last and last.direction == "bot" and last.created_at and not DIRECT_MODE:
-                    target_age = random.uniform(10.0, 30.0)
+                    target_age = random.uniform(10.0, 25.0)
                     age = _message_age_seconds(last.created_at)
                     if age < target_age:
                         self._set(aid, status="waiting", last_activity=_now_iso())
