@@ -1178,7 +1178,8 @@ class AIChatManager:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         got = False
-        quiet_until = 0.0
+        ev = manager.ai_event(account_id)
+        ev.clear()
         while not stop.is_set() and loop.time() < deadline:
             found = 0
             batch: list[tuple[int, str]] = []
@@ -1198,12 +1199,15 @@ class AIChatManager:
                 got = True
                 self._set(account_id, status="reading", last_activity=_now_iso())
             if found:
-                quiet_until = loop.time() + 1.5
-            elif got and loop.time() >= quiet_until:
                 return True
-            # Do not hammer Telegram with one history request per second per
-            # account. Many accounts run at the same time.
-            await self._sleep_or_stop(stop, 2.5)
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            ev.clear()
         return got
 
     # ---------- AI ----------

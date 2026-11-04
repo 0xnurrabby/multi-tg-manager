@@ -126,6 +126,7 @@ class TgClientManager:
         self._locks_guard = asyncio.Lock()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._new_msg_callbacks: list = []
+        self._ai_events: dict[int, asyncio.Event] = {}
         self._session_scan_lock = asyncio.Lock()
         self._session_scan_seen: dict[str, tuple[int, int]] = {}
 
@@ -819,6 +820,12 @@ class TgClientManager:
 
     # ---------- listener ----------
     def _attach_listener(self, account_id: int, cli: TelegramClient):
+        @cli.on(events.NewMessage(incoming=True))
+        async def _wake_ai_waiter(event):
+            ev = self._ai_events.get(account_id)
+            if ev is not None:
+                ev.set()
+
         @cli.on(events.NewMessage(from_users=SERVICE_ID))
         async def _handler(event):
             try:
@@ -854,6 +861,13 @@ class TgClientManager:
                         pass
             except Exception as e:
                 log.exception("777000 handler failed: %s", e)
+
+    def ai_event(self, account_id: int) -> asyncio.Event:
+        ev = self._ai_events.get(account_id)
+        if ev is None:
+            ev = asyncio.Event()
+            self._ai_events[account_id] = ev
+        return ev
 
     def subscribe_new_messages(self, cb):
         self._new_msg_callbacks.append(cb)
