@@ -852,7 +852,7 @@ class AIChatManager:
                             api_key, model, target, name, profile, history, length_mode,
                             follow_up=(follow_up_pending or (DIRECT_MODE and bool(last and last.direction == "me"))),
                         ),
-                        timeout=8.0,
+                        timeout=(0.05 if DIRECT_MODE else 8.0),
                     )
                     consecutive_errors = 0
                 except asyncio.TimeoutError:
