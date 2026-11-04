@@ -258,6 +258,8 @@ class GatewayError(Exception):
 def _gateway_request(method: str, path: str, api_key: str, payload: dict | None = None,
                      timeout: float = 45.0) -> dict:
     url = GATEWAY_BASE + path
+    if payload is not None and payload.get("model") and "providerOptions" not in payload:
+        payload = {**payload, "providerOptions": GATEWAY_PROVIDER_OPTIONS}
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -765,7 +767,7 @@ class AIChatManager:
                 if last and last.direction == "me" and not force_first and not DIRECT_MODE:
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     got = await self._wait_for_bot(
-                        aid, cli, entity, last.tg_msg_id or 0, stop, timeout=30,
+                        aid, cli, entity, last.tg_msg_id or 0, stop, timeout=10,
                     )
                     if stop.is_set():
                         break
@@ -901,7 +903,7 @@ class AIChatManager:
                     continue
 
                 got = await self._wait_for_bot(
-                    aid, cli, entity, sent.id, stop, timeout=30,
+                    aid, cli, entity, sent.id, stop, timeout=10,
                 )
                 if stop.is_set():
                     break
