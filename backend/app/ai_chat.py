@@ -8,6 +8,7 @@ and model are configured from the dashboard and stored locally in
 from __future__ import annotations
 import asyncio
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import random
@@ -420,7 +421,8 @@ class AIChatManager:
         self._state: dict[int, dict] = {}
         # AI calls are cheap but not free; this only limits simultaneous Gateway
         # calls. Every account still has its own task, profile and conversation.
-        self._ai_sem = asyncio.Semaphore(250)
+        self._ai_sem = asyncio.Semaphore(300)
+        self._gateway_pool = ThreadPoolExecutor(max_workers=350, thread_name_prefix="ai-gateway")
         # Avoid a burst of 100+ Telegram history requests when a big fill starts.
         self._init_sem = asyncio.Semaphore(15)
         # Every account runs together, but messages leave at a steady pace so
@@ -847,16 +849,10 @@ class AIChatManager:
                 ][-4:]
                 try:
                     self._set(aid, status="thinking", last_activity=_now_iso())
-                    reply = await asyncio.wait_for(
-                        self._generate_reply(
-                            api_key, model, target, name, profile, history, length_mode,
-                            follow_up=(follow_up_pending or (DIRECT_MODE and bool(last and last.direction == "me"))),
-                        ),
-                        timeout=(0.05 if DIRECT_MODE else 8.0),
+                    reply = await self._generate_reply(
+                        api_key, model, target, name, profile, history, length_mode,
+                        follow_up=(follow_up_pending or (DIRECT_MODE and bool(last and last.direction == "me"))),
                     )
-                    consecutive_errors = 0
-                except asyncio.TimeoutError:
-                    reply = _local_question(language_name, own_for_fallback)
                     consecutive_errors = 0
                 except GatewayError as e:
                     consecutive_errors += 1
@@ -1248,6 +1244,13 @@ class AIChatManager:
             ev.clear()
         return got
 
+    async def _gateway_post(self, api_key: str, payload: dict, timeout: float = 45.0) -> dict:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._gateway_pool, _gateway_request,
+            "POST", "/chat/completions", api_key, payload, timeout,
+        )
+
     # ---------- AI ----------
     async def _rewrite_message(self, text: str, language_name: str, max_len: int,
                                api_key: str, model: str) -> str:
@@ -1339,9 +1342,7 @@ class AIChatManager:
             }
             try:
                 async with self._ai_sem:
-                    data = await asyncio.to_thread(
-                        _gateway_request, "POST", "/chat/completions", api_key, payload, 45.0,
-                    )
+                    data = await self._gateway_post(api_key, payload)
             except Exception:
                 continue
             choice = (data.get("choices") or [{}])[0]
@@ -1403,9 +1404,7 @@ class AIChatManager:
             }
             try:
                 async with self._ai_sem:
-                    data = await asyncio.to_thread(
-                        _gateway_request, "POST", "/chat/completions", api_key, payload, 45.0,
-                    )
+                    data = await self._gateway_post(api_key, payload)
             except Exception:
                 return _local_question(language_name, own)
             choice = (data.get("choices") or [{}])[0]
@@ -1455,9 +1454,7 @@ class AIChatManager:
                 "reasoning": {"enabled": False},
             }
             async with self._ai_sem:
-                data = await asyncio.to_thread(
-                    _gateway_request, "POST", "/chat/completions", api_key, payload, 45.0,
-                )
+                data = await self._gateway_post(api_key, payload)
             choice = (data.get("choices") or [{}])[0]
             message = choice.get("message") or {}
             content = message.get("content")
