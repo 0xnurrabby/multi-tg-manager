@@ -82,6 +82,8 @@ async def count_sent_today(cli, target: str) -> int:
             break
         if getattr(m, "out", False):
             count += 1
+            if count >= DAILY_LIMIT:
+                break
     return count
 
 PERSONAS = [
@@ -584,12 +586,14 @@ class AIChatManager:
                     min_turns: int = 4, max_turns: int = 10,
                     fixed_target: int | None = None, skip_start: bool = False,
                     daily_sent: int = 0, daily_limit: int = 0,
-                    fill_daily: bool = False, stagger_max: float = 45.0) -> bool:
+                    fill_daily: bool = False, stagger_max: float = 45.0,
+                    profile: dict | None = None) -> bool:
         aid = account.id
         if self.is_running(aid):
             return False
         stop = asyncio.Event()
-        profile = await self.get_profile(account)
+        if profile is None:
+            profile = await self.get_profile(account)
         lo = max(1, min(int(min_turns or 4), 500))
         hi = max(lo, min(int(max_turns or 10), 500))
         if fixed_target is None:

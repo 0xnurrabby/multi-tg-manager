@@ -67,8 +67,27 @@ def _msg_dict(m: AiChatMessage) -> dict:
     }
 
 
+async def _stored_daily_counts(db: AsyncSession, account_ids: list[int]) -> dict[int, int]:
+    reset = daily_reset_utc().replace(tzinfo=None)
+    counts = {aid: 0 for aid in account_ids}
+    if not account_ids:
+        return counts
+    res = await db.execute(
+        select(AiChatMessage.account_id, func.count(AiChatMessage.id))
+        .where(
+            AiChatMessage.direction == "me",
+            AiChatMessage.created_at >= reset,
+            AiChatMessage.account_id.in_(account_ids),
+        )
+        .group_by(AiChatMessage.account_id)
+    )
+    for aid, count in res.all():
+        counts[aid] = int(count)
+    return counts
+
+
 async def _daily_counts(accounts: list[Account], target: str) -> tuple[dict[int, int], list[dict]]:
-    sem = asyncio.Semaphore(10)
+    sem = asyncio.Semaphore(500)
 
     async def one(acc: Account):
         cli = manager.get(acc.id)
@@ -402,7 +421,7 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
     # Reconnect those missing clients before counting or starting.
     missing = [a for a in accounts if not manager.get(a.id)]
     if missing:
-        reconnect_sem = asyncio.Semaphore(6)
+        reconnect_sem = asyncio.Semaphore(40)
 
         async def reconnect(acc):
             async with reconnect_sem:
@@ -414,8 +433,7 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
         await asyncio.gather(*(reconnect(a) for a in missing), return_exceptions=True)
     blocked: set[int] = set()
     if body.fill_daily:
-        counts, count_errors = await _daily_counts(accounts, target)
-        errors.extend(count_errors)
+        counts = await _stored_daily_counts(db, [a.id for a in accounts])
         today = bd_day_key()
         blocked = {
             p.account_id for p in profiles_by_id.values()
@@ -436,8 +454,8 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
             continue
         remaining = None
         target_limit = DAILY_LIMIT
+        prof = profiles_by_id.get(acc.id)
         if body.fill_daily:
-            prof = profiles_by_id.get(acc.id)
             target_limit = min(
                 DAILY_LIMIT,
                 max(1, int(getattr(prof, "daily_limit", 0) or DAILY_LIMIT)),
@@ -461,6 +479,18 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
                 )
                 skipped.append(acc.id)
                 continue
+        if prof:
+            profile_data = {
+                "label": prof.persona,
+                "style": prof.style,
+                "language": prof.language,
+                "topic": prof.topic,
+                "reset_at": prof.reset_at,
+                "daily_limit": int(prof.daily_limit or DAILY_LIMIT),
+            }
+        else:
+            profile_data = ai_manager.persona_for(acc)
+            profile_data.update({"reset_at": None, "daily_limit": target_limit})
         try:
             ok = await ai_manager.start(
                 acc, cfg["api_key"], model, target,
@@ -471,6 +501,7 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
                 daily_limit=target_limit if body.fill_daily else 0,
                 fill_daily=body.fill_daily,
                 stagger_max=stagger_max,
+                profile=profile_data,
             )
             if ok:
                 started.append(acc.id)
