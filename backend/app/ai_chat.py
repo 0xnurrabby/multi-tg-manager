@@ -22,6 +22,7 @@ from sqlalchemy import select, desc
 from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
 
+from .config import settings
 from .db import AsyncSessionLocal
 from .models import Account, AiChatMessage, AiChatProfile
 from .tg_manager import manager
@@ -426,16 +427,14 @@ class AIChatManager:
         self._tasks: dict[int, asyncio.Task] = {}
         self._stops: dict[int, asyncio.Event] = {}
         self._state: dict[int, dict] = {}
-        # AI calls are cheap but not free; this only limits simultaneous Gateway
-        # calls. Every account still has its own task, profile and conversation.
-        self._ai_sem = asyncio.Semaphore(300)
-        self._gateway_pool = ThreadPoolExecutor(max_workers=350, thread_name_prefix="ai-gateway")
-        # Avoid a burst of 100+ Telegram history requests when a big fill starts.
-        self._init_sem = asyncio.Semaphore(15)
-        # Every account runs together, but messages leave at a steady pace so
-        # the target is not hit by a 100+ message burst at the same second.
-        self._send_lock = asyncio.Lock()
-        self._last_send_at = 0.0
+        # Every account has its own task and conversation. These limits only
+        # cap external work; no account waits behind another account's chat.
+        self._ai_sem = asyncio.Semaphore(max(1, settings.AI_CONCURRENCY))
+        self._gateway_pool = ThreadPoolExecutor(
+            max_workers=max(1, settings.AI_GATEWAY_WORKERS),
+            thread_name_prefix="ai-gateway",
+        )
+        self._init_sem = asyncio.Semaphore(max(1, settings.AI_INIT_CONCURRENCY))
 
     # ---------- profiles ----------
     def _make_profile(self, account: Account) -> dict:
@@ -951,18 +950,9 @@ class AIChatManager:
             self._set(aid, running=False, status="error", last_error=str(e)[:300], last_activity=_now_iso())
 
     async def _send_paced(self, cli, entity, text: str, reply_to=None, stop=None):
-        loop = asyncio.get_running_loop()
-        async with self._send_lock:
-            if stop is not None and stop.is_set():
-                return None
-            wait = self._last_send_at + 0.02 - loop.time()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            if stop is not None and stop.is_set():
-                return None
-            sent = await cli.send_message(entity, text, reply_to=reply_to)
-            self._last_send_at = loop.time()
-            return sent
+        if stop is not None and stop.is_set():
+            return None
+        return await cli.send_message(entity, text, reply_to=reply_to)
 
     @staticmethod
     def _choose_quote(history, reply: str):

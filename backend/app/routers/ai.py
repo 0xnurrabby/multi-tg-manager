@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..db import get_db
 from ..models import Account, AiChatMessage, AiChatProfile
 from ..schemas import AiCustomIn, AiDailyCountsIn, AiSettingsIn, AiStartIn, AiStopIn
@@ -422,7 +423,7 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
     # Reconnect those missing clients before counting or starting.
     missing = [a for a in accounts if not manager.get(a.id)]
     if missing:
-        reconnect_sem = asyncio.Semaphore(40)
+        reconnect_sem = asyncio.Semaphore(max(1, settings.STARTUP_CONCURRENCY))
 
         async def reconnect(acc):
             async with reconnect_sem:

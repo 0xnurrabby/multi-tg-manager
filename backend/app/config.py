@@ -12,7 +12,10 @@ class Settings(BaseSettings):
     RATE_MIN: float = 0.7
     RATE_MAX: float = 1.5
     CONCURRENCY: int = 8  # how many accounts a bulk task processes in parallel
-    STARTUP_CONCURRENCY: int = 25  # how many accounts connect in parallel on boot
+    STARTUP_CONCURRENCY: int = 50  # how many accounts connect in parallel on boot
+    AI_INIT_CONCURRENCY: int = 100  # per-account history/entity setup in parallel
+    AI_CONCURRENCY: int = 600  # simultaneous AI Gateway generations
+    AI_GATEWAY_WORKERS: int = 650  # blocking HTTP workers for the AI Gateway
     ALLOWED_ORIGIN: str = "http://localhost:5173"
 
     APP_PASSWORD: str = ""
