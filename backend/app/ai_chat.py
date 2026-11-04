@@ -38,6 +38,7 @@ GATEWAY_PROVIDER_OPTIONS = {
     }
 }
 DAILY_LIMIT = 100
+DIRECT_MODE = True
 BD_TZ = timezone(timedelta(hours=6), "Asia/Dhaka")
 
 
@@ -760,7 +761,7 @@ class AIChatManager:
                     limit_reached = True
                     stop_note = "Daily limit reached. Skipping this account until the next reset."
                     break
-                if last and last.direction == "me" and not force_first:
+                if last and last.direction == "me" and not force_first and not DIRECT_MODE:
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     after = last.tg_msg_id or 0
                     got = await self._wait_for_bot(
@@ -792,7 +793,7 @@ class AIChatManager:
                     if not last:
                         continue
 
-                if last and last.direction != "bot" and not force_first:
+                if last and last.direction != "bot" and not force_first and not DIRECT_MODE:
                     await self._sleep_or_stop(stop, 5)
                     continue
 
@@ -838,7 +839,7 @@ class AIChatManager:
                     self._set(aid, status="thinking", last_activity=_now_iso())
                     reply = await self._generate_reply(
                         api_key, model, target, name, profile, history, length_mode,
-                        follow_up=follow_up_pending,
+                        follow_up=(follow_up_pending or (DIRECT_MODE and bool(last and last.direction == "me"))),
                     )
                     consecutive_errors = 0
                 except GatewayError as e:
@@ -869,7 +870,7 @@ class AIChatManager:
                 if stop.is_set():
                     break
 
-                if last and last.direction == "bot" and last.created_at:
+                if last and last.direction == "bot" and last.created_at and not DIRECT_MODE:
                     target_age = random.uniform(10.0, 30.0)
                     age = _message_age_seconds(last.created_at)
                     if age < target_age:
@@ -911,6 +912,15 @@ class AIChatManager:
                     aid, turns_done=turns_done, daily_sent=daily_sent,
                     status="waiting", last_activity=_now_iso(),
                 )
+
+                if DIRECT_MODE:
+                    next_send_at = loop.time() + random.uniform(30.0, 60.0)
+                    self._set(aid, status="waiting", last_activity=_now_iso())
+                    asyncio.create_task(
+                        self._collect_bot_reply(aid, cli, entity, sent.id, stop),
+                        name=f"ai-collect-{aid}",
+                    )
+                    continue
 
                 got = await self._wait_for_bot(
                     aid, cli, entity, sent.id, stop, timeout=(35 if no_reply_retries < 2 else 30),
@@ -1164,6 +1174,15 @@ class AIChatManager:
 
         await asyncio.gather(*(one(a) for a in accounts))
         return {"sent": sent, "skipped": skipped, "errors": errors}
+
+    async def _collect_bot_reply(self, account_id: int, cli, entity, after_id: int,
+                                 stop: asyncio.Event):
+        try:
+            await self._wait_for_bot(
+                account_id, cli, entity, after_id, stop, timeout=150,
+            )
+        except Exception:
+            pass
 
     async def _watch_custom_reply(self, account_id: int, cli, entity, after_id: int):
         try:
