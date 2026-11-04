@@ -38,7 +38,7 @@ GATEWAY_PROVIDER_OPTIONS = {
     }
 }
 DAILY_LIMIT = 100
-DIRECT_MODE = False
+DIRECT_MODE = True
 FAST_DELAYS = True
 BD_TZ = timezone(timedelta(hours=6), "Asia/Dhaka")
 
@@ -921,7 +921,7 @@ class AIChatManager:
                 )
 
                 if DIRECT_MODE:
-                    next_send_at = loop.time() + random.uniform(30.0, 60.0)
+                    next_send_at = loop.time() + random.uniform(20.0, 60.0)
                     self._set(aid, status="waiting", last_activity=_now_iso())
                     asyncio.create_task(
                         self._collect_bot_reply(aid, cli, entity, sent.id, stop),

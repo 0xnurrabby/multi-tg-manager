@@ -166,17 +166,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
         if not acc:
             continue
         prof = profiles.get(aid)
-        reset_at = prof.reset_at if prof and prof.reset_at else None
         msgs = []
-        if include_messages:
-            q = select(AiChatMessage).where(AiChatMessage.account_id == aid)
-            if reset_at is not None:
-                q = q.where(AiChatMessage.created_at >= reset_at)
-            q = q.order_by(desc(AiChatMessage.id)).limit(limit)
-            res = await db.execute(q)
-            rows = list(res.scalars().all())
-            rows.reverse()
-            msgs = [_msg_dict(m) for m in rows]
         st = state.get(aid) or {}
         limit_today = bool(prof and prof.limit_day == today)
         if limit_today and not st:
@@ -232,6 +222,8 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
     active_chats = [c for c in out if c["running"]]
     now = datetime.now(timezone.utc)
     reset = daily_reset_utc()
+    if reset <= now:
+        reset = reset + timedelta(days=1)
     remaining_total = sum(c["remaining_messages"] for c in active_chats)
     rate_total = round(sum(c["rate_per_min"] for c in active_chats), 2)
     known_etas = [c["eta_seconds"] for c in active_chats if c["eta_seconds"] is not None]
@@ -257,6 +249,22 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
 
     # Running first, then latest activity.
     out.sort(key=lambda x: (1 if x["running"] else 0, str(x.get("last_activity") or "")), reverse=True)
+
+    # Message bodies are only needed for the cards visible on screen. Querying
+    # 400+ accounts x N messages on every status poll made the local UI lag.
+    if include_messages:
+        for chat in out[:20]:
+            aid = chat["account_id"]
+            prof = profiles.get(aid)
+            reset_at = prof.reset_at if prof and prof.reset_at else None
+            q = select(AiChatMessage).where(AiChatMessage.account_id == aid)
+            if reset_at is not None:
+                q = q.where(AiChatMessage.created_at >= reset_at)
+            q = q.order_by(desc(AiChatMessage.id)).limit(limit)
+            res = await db.execute(q)
+            rows = list(res.scalars().all())
+            rows.reverse()
+            chat["messages"] = [_msg_dict(m) for m in rows]
 
     cfg = await ai_store.get_settings()
     snapshot = ai_manager.snapshot()
