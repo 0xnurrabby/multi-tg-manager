@@ -21,12 +21,13 @@ router = APIRouter(prefix="/api", tags=["accounts"])
 log = logging.getLogger("accounts")
 
 
-async def _account_to_out(acc: Account, db: AsyncSession) -> AccountOut:
-    unread = await db.scalar(
-        select(func.count(SecurityMessage.id)).where(
-            SecurityMessage.account_id == acc.id, SecurityMessage.is_read == False  # noqa: E712
+async def _account_to_out(acc: Account, db: AsyncSession, unread: int | None = None) -> AccountOut:
+    if unread is None:
+        unread = await db.scalar(
+            select(func.count(SecurityMessage.id)).where(
+                SecurityMessage.account_id == acc.id, SecurityMessage.is_read == False  # noqa: E712
+            )
         )
-    )
     return AccountOut(
         id=acc.id,
         phone=acc.phone,
@@ -67,10 +68,17 @@ def _account_fallback(acc: Account) -> AccountOut:
 @router.get("/accounts", response_model=list[AccountOut])
 async def list_accounts(db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(Account).order_by(Account.id))
-    out = []
-    for acc in res.scalars().all():
-        out.append(await _account_to_out(acc, db))
-    return out
+    accounts = list(res.scalars().all())
+    unread_res = await db.execute(
+        select(SecurityMessage.account_id, func.count(SecurityMessage.id))
+        .where(SecurityMessage.is_read == False)  # noqa: E712
+        .group_by(SecurityMessage.account_id)
+    )
+    unread = {aid: count for aid, count in unread_res.all()}
+    return [
+        await _account_to_out(acc, db, unread.get(acc.id, 0))
+        for acc in accounts
+    ]
 
 
 @router.post("/accounts/remove_all")

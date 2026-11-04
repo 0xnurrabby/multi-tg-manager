@@ -95,6 +95,15 @@ async def _migrate_sqlite(conn):
             "ALTER TABLE ai_chat_profiles ADD COLUMN daily_limit INTEGER DEFAULT 100"
         )
 
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_ai_chat_messages_direction_created "
+        "ON ai_chat_messages (direction, created_at)"
+    )
+    await conn.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_ai_chat_messages_account_created "
+        "ON ai_chat_messages (account_id, created_at)"
+    )
+
 
 async def get_db():
     async with AsyncSessionLocal() as session:

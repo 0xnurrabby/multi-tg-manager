@@ -17,6 +17,7 @@ from .. import ai_store
 from ..ai_chat import (
     DAILY_LIMIT,
     GatewayError,
+    _is_limit_message,
     ai_manager,
     bd_day_key,
     count_sent_today,
@@ -435,10 +436,34 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
     if body.fill_daily:
         counts = await _stored_daily_counts(db, [a.id for a in accounts])
         today = bd_day_key()
-        blocked = {
-            p.account_id for p in profiles_by_id.values()
-            if p.limit_day == today
-        }
+        reset_naive = daily_reset_utc().replace(tzinfo=None)
+        stale = False
+        for prof in profiles_by_id.values():
+            if prof.limit_day != today:
+                continue
+            last_bot = await db.scalar(
+                select(AiChatMessage)
+                .where(
+                    AiChatMessage.account_id == prof.account_id,
+                    AiChatMessage.direction == "bot",
+                )
+                .order_by(desc(AiChatMessage.id))
+                .limit(1)
+            )
+            created = getattr(last_bot, "created_at", None)
+            if created is not None and getattr(created, "tzinfo", None) is not None:
+                created = created.astimezone(timezone.utc).replace(tzinfo=None)
+            if (
+                last_bot is None
+                or not _is_limit_message(last_bot.text)
+                or (created is not None and created < reset_naive)
+            ):
+                prof.limit_day = None
+                stale = True
+            else:
+                blocked.add(prof.account_id)
+        if stale:
+            await db.commit()
 
     custom_reset = set(
         await ai_manager.reset_context_after_custom([a.id for a in accounts])

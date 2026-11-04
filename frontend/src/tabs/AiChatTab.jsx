@@ -183,7 +183,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
 
   const refreshStatus = useCallback(async () => {
     try {
-      const s = await Endpoints.aiStatus(12)
+      const s = await Endpoints.aiStatus(12, false)
       setStatus(s)
       return s
     } catch {

@@ -395,7 +395,12 @@ def _language_ok(text: str, language: str) -> bool:
 
 
 BOT_LIMIT_RE = re.compile(
-    r"(daily limit|message limit|messages? today|texts? today|sent me 100|pausing until)",
+    r"(?:(?:reached|hit|exceeded)\s+(?:today'?s?\s+)?"
+    r"(?:(?:the\s+)?(?:daily|message|text)\s+limit|(?:\d{1,4}\s*[- ]?\s*)?(?:message|text)s?\s+limit)"
+    r"|\blimit\s+(?:reached|hit|exceeded)"
+    r"|\bpausing\s+until\b"
+    r"|\bout\s+of\s+(?:messages|texts)\b"
+    r"|\bno\s+(?:messages|texts)\s+left\b)",
     re.I,
 )
 LIMIT_VALUE_RE = re.compile(r"(\d{1,4})\s*[- ]?\s*(?:messages?|texts?)", re.I)
@@ -760,7 +765,15 @@ class AIChatManager:
                 last = history[-1] if history else None
                 if follow_up_pending and last and last.direction == "bot":
                     follow_up_pending = False
-                if last and last.direction == "bot" and _is_limit_message(last.text):
+                msg_date = last.created_at if last else None
+                if msg_date is not None and getattr(msg_date, "tzinfo", None) is not None:
+                    msg_date = msg_date.astimezone(timezone.utc).replace(tzinfo=None)
+                reset_naive = daily_reset_utc().replace(tzinfo=None)
+                is_today_limit = bool(
+                    last and last.direction == "bot" and _is_limit_message(last.text)
+                    and (msg_date is None or msg_date >= reset_naive)
+                )
+                if is_today_limit:
                     limit_value = _limit_value(last.text)
                     await self._mark_limit_reached(aid, limit_value)
                     if limit_value:

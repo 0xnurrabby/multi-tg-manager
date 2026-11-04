@@ -17,6 +17,7 @@ from .auth import router as auth_router, require_auth
 from .routers import accounts, profile, security, groups, messaging, settings as settings_router, bulk, ai as ai_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.getLogger("telethon").setLevel(logging.WARNING)
 log = logging.getLogger("main")
 
 
