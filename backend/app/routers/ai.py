@@ -172,7 +172,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
             st = {
                 "status": "limit",
                 "running": False,
-                "daily_limit": 0,
+                "daily_limit": int(prof.daily_limit or DAILY_LIMIT) if prof else DAILY_LIMIT,
                 "last_error": "Daily limit reached. Skipping this account until the next reset.",
             }
         if not msgs and not st.get("running") and not st.get("last_error") and not st.get("daily_limit") and not limit_today:
@@ -192,7 +192,11 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
             "turns_done": int(st.get("turns_done") or 0),
             "turn_target": int(st.get("turn_target") or 0),
             "daily_sent": int(st.get("daily_sent") or 0),
-            "daily_limit": int(st.get("daily_limit") or 0),
+            "daily_limit": int(
+                st.get("daily_limit")
+                or (prof.daily_limit if prof else 0)
+                or DAILY_LIMIT
+            ),
             "fill_daily": bool(st.get("fill_daily")),
             "last_error": st.get("last_error") or "",
             "started_at": st.get("started_at"),
@@ -324,6 +328,13 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
     skipped: list[int] = []
     errors: list[dict] = []
     counts: dict[int, int] = {}
+    limits: dict[int, int] = {}
+    res = await db.execute(
+        select(AiChatProfile).where(
+            AiChatProfile.account_id.in_([a.id for a in accounts])
+        )
+    )
+    profiles_by_id = {p.account_id: p for p in res.scalars().all()}
 
     # The DB can still say "connected" after a session failed to load at boot.
     # Reconnect those missing clients before counting or starting.
@@ -343,14 +354,9 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
     if body.fill_daily:
         counts, count_errors = await _daily_counts(accounts, target)
         errors.extend(count_errors)
-        res = await db.execute(
-            select(AiChatProfile).where(
-                AiChatProfile.account_id.in_([a.id for a in accounts])
-            )
-        )
         today = bd_day_key()
         blocked = {
-            p.account_id for p in res.scalars().all()
+            p.account_id for p in profiles_by_id.values()
             if p.limit_day == today
         }
 
@@ -367,20 +373,27 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
                 errors.append({"account_id": acc.id, "error": "Account is not connected"})
             continue
         remaining = None
+        target_limit = DAILY_LIMIT
         if body.fill_daily:
+            prof = profiles_by_id.get(acc.id)
+            target_limit = min(
+                DAILY_LIMIT,
+                max(1, int(getattr(prof, "daily_limit", 0) or DAILY_LIMIT)),
+            )
+            limits[acc.id] = target_limit
             if ai_manager.is_running(acc.id):
                 skipped.append(acc.id)
                 continue
             if acc.id not in counts:
                 continue
-            remaining = DAILY_LIMIT - counts[acc.id]
+            remaining = target_limit - counts[acc.id]
             if remaining <= 0:
-                ai_manager.mark_daily(acc.id, counts[acc.id], DAILY_LIMIT)
+                ai_manager.mark_daily(acc.id, counts[acc.id], target_limit)
                 skipped.append(acc.id)
                 continue
             if acc.id in blocked:
                 ai_manager.mark_daily(
-                    acc.id, counts[acc.id], DAILY_LIMIT,
+                    acc.id, counts[acc.id], target_limit,
                     status="limit",
                     last_error="Daily limit reached. Skipping this account until the next reset.",
                 )
@@ -393,7 +406,7 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
                 fixed_target=remaining,
                 skip_start=body.fill_daily or acc.id in custom_reset,
                 daily_sent=counts.get(acc.id, 0) if body.fill_daily else 0,
-                daily_limit=DAILY_LIMIT if body.fill_daily else 0,
+                daily_limit=target_limit if body.fill_daily else 0,
                 fill_daily=body.fill_daily,
                 stagger_max=stagger_max,
             )
@@ -410,6 +423,7 @@ async def start_chats(body: AiStartIn, request: Request, db: AsyncSession = Depe
         "started": started,
         "skipped": skipped,
         "counts": counts,
+        "limits": limits,
         "daily_limit": DAILY_LIMIT,
         "errors": errors,
         "running": len(ai_manager.running_ids()),

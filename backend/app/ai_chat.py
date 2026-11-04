@@ -390,13 +390,25 @@ def _language_ok(text: str, language: str) -> bool:
 
 
 BOT_LIMIT_RE = re.compile(
-    r"(daily limit|100 texts today|sent me 100|pausing until)",
+    r"(daily limit|message limit|messages? today|texts? today|sent me 100|pausing until)",
     re.I,
 )
+LIMIT_VALUE_RE = re.compile(r"(\d{1,4})\s*[- ]?\s*(?:messages?|texts?)", re.I)
 
 
 def _is_limit_message(text: str) -> bool:
     return bool(BOT_LIMIT_RE.search(text or ""))
+
+
+def _limit_value(text: str) -> int | None:
+    for match in LIMIT_VALUE_RE.finditer(text or ""):
+        try:
+            value = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if 1 <= value <= 1000:
+            return value
+    return None
 
 
 class AIChatManager:
@@ -462,6 +474,7 @@ class AIChatManager:
                     "language": row.language,
                     "topic": row.topic,
                     "reset_at": row.reset_at,
+                    "daily_limit": int(row.daily_limit or DAILY_LIMIT),
                 }
             data = self._make_profile(account)
             now = datetime.utcnow()
@@ -475,6 +488,7 @@ class AIChatManager:
             ))
             await db.commit()
             data["reset_at"] = now
+            data["daily_limit"] = DAILY_LIMIT
             return data
 
     def _set(self, account_id: int, **kw):
@@ -542,7 +556,7 @@ class AIChatManager:
                 await db.commit()
         return sorted(changed)
 
-    async def _mark_limit_reached(self, account_id: int):
+    async def _mark_limit_reached(self, account_id: int, limit_value: int | None = None):
         day = bd_day_key()
         try:
             async with AsyncSessionLocal() as db:
@@ -551,6 +565,8 @@ class AIChatManager:
                 )
                 if prof:
                     prof.limit_day = day
+                    if limit_value and limit_value > 0:
+                        prof.daily_limit = max(1, min(DAILY_LIMIT, int(limit_value)))
                     await db.commit()
         except Exception as e:
             log.warning("could not save daily limit for %s: %s", account_id, e)
@@ -737,7 +753,10 @@ class AIChatManager:
                 if follow_up_pending and last and last.direction == "bot":
                     follow_up_pending = False
                 if last and last.direction == "bot" and _is_limit_message(last.text):
-                    await self._mark_limit_reached(aid)
+                    limit_value = _limit_value(last.text)
+                    await self._mark_limit_reached(aid, limit_value)
+                    if limit_value:
+                        self._set(aid, daily_limit=min(DAILY_LIMIT, int(limit_value)))
                     limit_reached = True
                     stop_note = "Daily limit reached. Skipping this account until the next reset."
                     break

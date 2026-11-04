@@ -486,6 +486,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   }
 
   const allChats = status?.accounts || []
+  const limitById = Object.fromEntries(
+    allChats.map((c) => [c.account_id, Number(c.daily_limit) || 0])
+  )
   const chats = focusChatId ? allChats.filter((c) => c.account_id === focusChatId) : allChats
   const displayedChats = focusChatId || showAllChats ? chats : chats.slice(0, 12)
   const focusedChat = focusChatId ? allChats.find((c) => c.account_id === focusChatId) : null
@@ -700,6 +703,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             {visibleAccounts.map((a) => {
               const isSelected = selected.includes(a.id)
               const disabled = a.status !== 'connected'
+              const dailyCap = limitById[a.id] || dailyLimit
               return (
                 <label key={a.id} className={
                   'flex items-center gap-2 px-2 py-1.5 rounded-full text-[12px] transition-colors ' +
@@ -729,9 +733,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
                     {dailyCounts[a.id] !== undefined && (
                       <span
                         className="font-mono text-[9px] text-muted"
-                        title={`${dailyCounts[a.id]} of ${dailyLimit} sent today`}
+                        title={`${dailyCounts[a.id]} of ${dailyCap} sent today`}
                       >
-                        {dailyCounts[a.id]}/{dailyLimit}
+                        {dailyCounts[a.id]}/{dailyCap}
                       </span>
                     )}
                     <span className="font-mono text-[9px] text-muted">{a.status}</span>

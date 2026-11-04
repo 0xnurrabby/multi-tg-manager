@@ -90,6 +90,10 @@ async def _migrate_sqlite(conn):
         await conn.exec_driver_sql(
             "ALTER TABLE ai_chat_profiles ADD COLUMN limit_day VARCHAR(10)"
         )
+    if "daily_limit" not in prof_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE ai_chat_profiles ADD COLUMN daily_limit INTEGER DEFAULT 100"
+        )
 
 
 async def get_db():

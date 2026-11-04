@@ -111,6 +111,8 @@ class AiChatProfile(Base):
     # Bangladesh calendar day when the bot stopped replying. Fill 100 skips
     # this account until the next daily reset.
     limit_day: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Real per-account daily cap enforced by the target bot (50 or 100).
+    daily_limit: Mapped[int] = mapped_column(Integer, default=100)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
