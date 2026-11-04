@@ -839,12 +839,24 @@ class AIChatManager:
                         await self._set_reaction(aid, last.tg_msg_id, emoji)
 
                 length_mode = self._length_mode(profile)
+                language_name = profile.get("language") or "English"
+                own_for_fallback = [
+                    (m.text or "").strip()
+                    for m in history
+                    if m.direction == "me" and (m.text or "").strip() not in ("", "/start", FALLBACK_REPLY)
+                ][-4:]
                 try:
                     self._set(aid, status="thinking", last_activity=_now_iso())
-                    reply = await self._generate_reply(
-                        api_key, model, target, name, profile, history, length_mode,
-                        follow_up=(follow_up_pending or (DIRECT_MODE and bool(last and last.direction == "me"))),
+                    reply = await asyncio.wait_for(
+                        self._generate_reply(
+                            api_key, model, target, name, profile, history, length_mode,
+                            follow_up=(follow_up_pending or (DIRECT_MODE and bool(last and last.direction == "me"))),
+                        ),
+                        timeout=8.0,
                     )
+                    consecutive_errors = 0
+                except asyncio.TimeoutError:
+                    reply = _local_question(language_name, own_for_fallback)
                     consecutive_errors = 0
                 except GatewayError as e:
                     consecutive_errors += 1

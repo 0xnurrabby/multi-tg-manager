@@ -529,6 +529,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
       }).format(finishAt)
     : ''
   const finishReason = status?.finish_reason || 'idle'
+  const resetAt = status?.reset_at ? new Date(status.reset_at) : null
+  const crossesReset = !!(finishAt && resetAt && finishAt > resetAt)
   const finishTitle =
     finishReason === 'done' ? 'Done'
       : finishReason === 'idle' ? 'Not running'
@@ -821,9 +823,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="text-[10px] text-muted font-mono mt-1">
               {status?.remaining_messages ?? 0} messages remaining ? {status?.rate_per_min ?? 0}/min
             </div>
-            {finishReason === 'reset' && (
+            {crossesReset && (
               <div className="text-[10px] text-muted mt-1">
-                Daily reset 6:00 AM ? full limit may not finish today.
+                Estimated finish crosses the 6:00 AM reset; work may be interrupted.
               </div>
             )}
           </div>
@@ -833,7 +835,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         </div>
       </div>
 
-      {/* Live conversations */}
+      {false && (
       <div id="ai-chats" className="scroll-mt-4">
         <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
           <div>
@@ -881,6 +883,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           </div>
         )}
       </div>
+      )}
 
       <ProgressModal progress={progress} onClose={close} />
     </div>

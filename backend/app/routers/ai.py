@@ -237,11 +237,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
         elif known_etas:
             max_eta = max(known_etas)
             estimated = now + timedelta(seconds=max_eta)
-            if estimated > reset:
-                estimated = reset
-                finish_reason = "reset"
-            else:
-                finish_reason = "limit"
+            finish_reason = "limit"
             finish_at = estimated
             finish_in = max(0, int((estimated - now).total_seconds()))
         else:
