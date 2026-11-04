@@ -820,10 +820,13 @@ class AIChatManager:
                 # Read the reply and pause like a person before answering.
                 self._set(aid, status="reading", last_error="", last_activity=_now_iso())
                 await self._mark_read(cli, entity)
-                await self._sleep_or_stop(stop, random.uniform(1.0, 3.0))
+                if DIRECT_MODE:
+                    await self._sleep_or_stop(stop, random.uniform(0.1, 0.4))
+                else:
+                    await self._sleep_or_stop(stop, random.uniform(1.0, 3.0))
                 if stop.is_set():
                     break
-                if random.random() < 0.05:
+                if not DIRECT_MODE and random.random() < 0.05:
                     await self._sleep_or_stop(stop, random.uniform(3.0, 8.0))
                     if stop.is_set():
                         break
@@ -866,7 +869,10 @@ class AIChatManager:
                     continue
 
                 self._set(aid, status="typing", last_error="", last_activity=_now_iso())
-                await self._human_delay(cli, entity, stop, reply, length_mode)
+                if DIRECT_MODE:
+                    await self._sleep_or_stop(stop, random.uniform(0.2, 0.8))
+                else:
+                    await self._human_delay(cli, entity, stop, reply, length_mode)
                 if stop.is_set():
                     break
 
@@ -975,7 +981,7 @@ class AIChatManager:
         async with self._send_lock:
             if stop is not None and stop.is_set():
                 return None
-            wait = self._last_send_at + 0.1 - loop.time()
+            wait = self._last_send_at + 0.02 - loop.time()
             if wait > 0:
                 await asyncio.sleep(wait)
             if stop is not None and stop.is_set():
