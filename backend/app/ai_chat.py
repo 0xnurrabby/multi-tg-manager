@@ -745,7 +745,7 @@ class AIChatManager:
 
             consecutive_errors = 0
             bot_timeouts = 0
-            no_reply_retries = 0
+            follow_up_sent = 0
             limit_reached = False
             stop_note = ""
             sent_window: list[float] = []
@@ -762,7 +762,9 @@ class AIChatManager:
                     continue
 
                 last = history[-1] if history else None
-                if follow_up_pending and last and last.direction == "bot":
+                if last and last.direction == "bot":
+                    bot_timeouts = 0
+                    follow_up_sent = 0
                     follow_up_pending = False
                 msg_date = last.created_at if last else None
                 if msg_date is not None and getattr(msg_date, "tzinfo", None) is not None:
@@ -788,7 +790,21 @@ class AIChatManager:
                     if stop.is_set():
                         break
                     if not got:
+                        bot_timeouts += 1
+                        if bot_timeouts >= 3 and follow_up_sent < 2:
+                            bot_timeouts = 0
+                            follow_up_sent += 1
+                            follow_up_pending = True
+                            force_first = True
+                            next_send_at = loop.time()
+                            self._set(aid, status="starting", last_error="", last_activity=_now_iso())
+                            continue
+                        if bot_timeouts >= 3:
+                            stop_note = "Bot is not replying to this account."
+                            break
                         continue
+                    bot_timeouts = 0
+                    follow_up_sent = 0
                     next_send_at = loop.time() + random.uniform(5.0, 10.0)
                     history = await self._load_history(aid, 24, profile.get("reset_at"))
                     last = history[-1] if history else None
@@ -1166,38 +1182,44 @@ class AIChatManager:
                             stop: asyncio.Event, timeout: float = 120.0) -> bool:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        got = False
         ev = manager.ai_event(account_id)
         ev.clear()
-        while not stop.is_set() and loop.time() < deadline:
-            found = 0
+
+        async def fetch_new() -> list[tuple[int, str]]:
             batch: list[tuple[int, str]] = []
             async for m in cli.iter_messages(entity, min_id=max(0, after_id), limit=20):
                 if getattr(m, "out", False) or m.id <= after_id:
                     continue
                 text = _message_text(m)
-                if not text:
-                    continue
-                batch.append((m.id, text))
-            # Telegram returns newest first; persist oldest first so the transcript
-            # and the AI context keep the real order.
-            for mid, text in sorted(batch, key=lambda x: x[0]):
-                await self._persist(account_id, "bot", text, mid)
-                after_id = max(after_id, mid)
-                found += 1
-                got = True
-                self._set(account_id, status="reading", last_activity=_now_iso())
-            if found:
-                return True
+                if text:
+                    batch.append((m.id, text))
+            return batch
+
+        while not stop.is_set() and loop.time() < deadline:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 break
+            try:
+                batch = await asyncio.wait_for(fetch_new(), timeout=remaining)
+            except asyncio.TimeoutError:
+                break
+            except Exception as e:
+                log.warning("bot reply fetch failed for %s: %s", account_id, e)
+                batch = []
+            if batch:
+                # Telegram returns newest first; persist oldest first so the transcript
+                # and the AI context keep the real order.
+                for mid, text in sorted(batch, key=lambda x: x[0]):
+                    await self._persist(account_id, "bot", text, mid)
+                    after_id = max(after_id, mid)
+                    self._set(account_id, status="reading", last_activity=_now_iso())
+                return True
             try:
                 await asyncio.wait_for(ev.wait(), timeout=remaining)
             except asyncio.TimeoutError:
                 break
             ev.clear()
-        return got
+        return False
 
     async def _gateway_post(self, api_key: str, payload: dict, timeout: float = 45.0) -> dict:
         loop = asyncio.get_running_loop()
