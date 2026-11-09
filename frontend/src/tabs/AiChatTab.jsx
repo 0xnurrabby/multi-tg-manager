@@ -6,6 +6,7 @@ import { useBulkProgress } from '../lib/useBulkProgress'
 
 const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash-0731'
 const DEFAULT_TARGET = '@folkapp_bot'
+const EARNING_PER_MESSAGE = 0.003
 const TONES = ['--accent-sun', '--accent-mint', '--accent-sky', '--accent-peach', '--accent-rose']
 
 function fmtClock(iso) {
@@ -528,6 +529,11 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const limit50Count = allChats.filter((c) => (Number(c.daily_limit) || dailyLimit) === 50).length
   const limit100Count = allChats.filter((c) => (Number(c.daily_limit) || dailyLimit) === 100).length
   const otherLimitCount = allChats.length - limit50Count - limit100Count
+  const expectedEarning = dailyTotal * EARNING_PER_MESSAGE
+  const earningText = expectedEarning.toLocaleString('en-US', {
+    style: 'currency', currency: 'USD',
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  })
   const finishAt = status?.finish_at ? new Date(status.finish_at) : null
   const finishIn = finishAt ? Math.max(0, Math.floor((finishAt.getTime() - clock) / 1000)) : 0
   const finishBd = finishAt
@@ -849,6 +855,22 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             {otherLimitCount > 0 && (
               <div className="text-[9px] text-muted mt-1.5">{otherLimitCount} account(s) with another limit</div>
             )}
+          </div>
+
+          <div
+            className="mt-2 rounded-2xl border border-[color:var(--hairline)] px-3 py-3 flex items-center justify-between gap-3"
+            style={{ background: 'linear-gradient(120deg, rgb(var(--accent-mint) / 0.62), rgb(var(--accent-sky) / 0.48) 55%, rgb(var(--accent-sun) / 0.38))' }}
+          >
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--positive))' }} />
+                Expected earning today
+              </div>
+              <div className="text-[9px] text-muted mt-1 font-mono">
+                {dailyTotal.toLocaleString('en-US')} messages × ${EARNING_PER_MESSAGE.toFixed(3)}
+              </div>
+            </div>
+            <div className="display-title text-[26px] leading-none tabular-nums text-ink shrink-0">{earningText}</div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-[color:var(--hairline)]">
