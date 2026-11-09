@@ -519,8 +519,15 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   ).length
   const dailyValues = Object.values(dailyCounts).map((n) => Number(n) || 0)
   const dailyTotal = dailyValues.reduce((sum, n) => sum + n, 0)
-  const dailyFull = dailyValues.filter((n) => n >= dailyLimit).length
+  const dailyFull = allChats.filter((c) => {
+    const cap = Number(c.daily_limit) || dailyLimit
+    const sent = Number(dailyCounts[c.account_id] ?? c.daily_sent ?? 0)
+    return cap > 0 && sent >= cap
+  }).length
   const limitCount = allChats.filter((c) => c.status === 'limit').length
+  const limit50Count = allChats.filter((c) => (Number(c.daily_limit) || dailyLimit) === 50).length
+  const limit100Count = allChats.filter((c) => (Number(c.daily_limit) || dailyLimit) === 100).length
+  const otherLimitCount = allChats.length - limit50Count - limit100Count
   const finishAt = status?.finish_at ? new Date(status.finish_at) : null
   const finishIn = finishAt ? Math.max(0, Math.floor((finishAt.getTime() - clock) / 1000)) : 0
   const finishBd = finishAt
@@ -808,10 +815,42 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="flex justify-between gap-2"><span>Model</span><span className="font-mono text-ink truncate max-w-[160px]">{settings?.model || DEFAULT_MODEL}</span></div>
             <div className="flex justify-between gap-2"><span>Checked today</span><span className="font-mono text-ink">{dailyValues.length} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Messages today</span><span className="font-mono text-ink">{dailyTotal}</span></div>
-            <div className="flex justify-between gap-2"><span>At 100 messages</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
+            <div className="flex justify-between gap-2"><span>At daily limit</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Bot limit reached</span><span className="font-mono text-ink">{limitCount} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">6:00 AM Bangladesh</span></div>
           </div>
+
+          <div className="mt-4">
+            <div className="micro-label mb-2">Message limit split</div>
+            <div className="grid grid-cols-2 gap-2">
+              <div
+                className="rounded-2xl border border-[color:var(--hairline)] px-3 py-2.5"
+                style={{ background: 'linear-gradient(135deg, rgb(var(--accent-peach) / 0.62), rgb(var(--accent-sun) / 0.28))' }}
+              >
+                <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--accent-peach))' }} />
+                  50-message limit
+                </div>
+                <div className="display-title text-[26px] leading-none mt-1.5 tabular-nums text-ink">{limit50Count}</div>
+                <div className="text-[9px] text-muted mt-0.5">accounts</div>
+              </div>
+              <div
+                className="rounded-2xl border border-[color:var(--hairline)] px-3 py-2.5"
+                style={{ background: 'linear-gradient(135deg, rgb(var(--accent-sky) / 0.58), rgb(var(--accent-mint) / 0.32))' }}
+              >
+                <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: 'rgb(var(--accent-sky))' }} />
+                  100-message limit
+                </div>
+                <div className="display-title text-[26px] leading-none mt-1.5 tabular-nums text-ink">{limit100Count}</div>
+                <div className="text-[9px] text-muted mt-0.5">accounts</div>
+              </div>
+            </div>
+            {otherLimitCount > 0 && (
+              <div className="text-[9px] text-muted mt-1.5">{otherLimitCount} account(s) with another limit</div>
+            )}
+          </div>
+
           <div className="mt-4 pt-3 border-t border-[color:var(--hairline)]">
             <div className="micro-label">Estimated work finish</div>
             <div className="display-title text-[26px] mt-1 tabular-nums">{finishTitle}</div>
