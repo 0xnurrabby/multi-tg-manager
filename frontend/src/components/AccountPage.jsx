@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import ProfileTab from '../tabs/ProfileTab'
 import { AccountRow } from '../tabs/SecurityTab'
 import { CopyButton } from '../lib/CopyButton'
@@ -10,6 +11,28 @@ function StatusBadge({ status }) {
 }
 
 export default function AccountPage({ account, accountNumber, accountTotal, onPrev, onNext, onRefresh, onOpenTab }) {
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      if (typeof document !== 'undefined' && (!document.hasFocus() || document.visibilityState !== 'visible')) return
+      const target = e.target
+      const tag = target?.tagName?.toLowerCase()
+      if (
+        target?.isContentEditable ||
+        tag === 'input' ||
+        tag === 'textarea' ||
+        tag === 'select' ||
+        target?.closest?.('[contenteditable="true"]')
+      ) return
+      e.preventDefault()
+      if (e.key === 'ArrowLeft') onPrev?.()
+      else onNext?.()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onPrev, onNext])
+
   if (!account) return null
   const name = `${account.first_name || ''} ${account.last_name || ''}`.trim() || account.phone
 
