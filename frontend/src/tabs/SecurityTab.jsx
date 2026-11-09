@@ -30,6 +30,7 @@ export function AccountRow({ account, focus, isSelected, focusTick, focused = fa
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(false)
   const [highlightId, setHighlightId] = useState(null)
+  const [pendingPress, setPendingPress] = useState(null)
   const cardRef = useRef(null)
   const lastMaxRef = useRef(0)
   const onChangeRef = useRef(onChange)
@@ -125,13 +126,18 @@ export function AccountRow({ account, focus, isSelected, focusTick, focused = fa
     } catch (e) { toast.error(e.message) } finally { setLoading(false) }
   }
 
-  async function pressButton(m, b) {
-    const label = b.text || 'button'
-    if (!confirm(`Press "${label}" for this Telegram message?\n\n${(m.message_text || '').slice(0, 200)}`)) return
+  function askPress(m, b) {
+    setPendingPress({ messageId: m.id, button: b, label: b.text || 'button' })
+  }
+
+  async function confirmPress() {
+    const pending = pendingPress
+    if (!pending) return
+    setPendingPress(null)
     setLoading(true)
     try {
-      const r = await Endpoints.pressSecurityButton(m.id, b.index)
-      toast.success(r?.answer && r.answer !== 'ok' ? r.answer : `Pressed: ${label}`)
+      const r = await Endpoints.pressSecurityButton(pending.messageId, pending.button.index)
+      toast.success(r?.answer && r.answer !== 'ok' ? r.answer : `Pressed: ${pending.label}`)
       await load()
       onChange?.()
     } catch (e) { toast.error(e.message) } finally { setLoading(false) }
@@ -213,11 +219,32 @@ export function AccountRow({ account, focus, isSelected, focusTick, focused = fa
                         <button key={b.index}
                           className={buttonClass(b.text) + ' !py-1 !px-3 text-xs'}
                           disabled={loading || !!m.action_status}
-                          onClick={() => pressButton(m, b)}>
+                          onClick={() => askPress(m, b)}>
                           {b.text || `Button ${b.index + 1}`}
                         </button>
                       )
                     })}
+                  </div>
+                )}
+                {pendingPress?.messageId === m.id && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--hairline)] bg-[rgb(var(--ink)/0.04)] px-3 py-2">
+                    <span className="text-xs">
+                      Press <strong>{pendingPress.label}</strong> for this message?
+                    </span>
+                    <button
+                      className="nb-btn !py-1 !px-3 text-xs"
+                      onClick={() => setPendingPress(null)}
+                      disabled={loading}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="nb-btn-pri !py-1 !px-3 text-xs"
+                      onClick={confirmPress}
+                      disabled={loading}
+                    >
+                      {loading ? 'Pressing…' : 'Confirm'}
+                    </button>
                   </div>
                 )}
                 {m.action_status && (
