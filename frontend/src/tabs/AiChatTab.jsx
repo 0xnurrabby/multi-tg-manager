@@ -149,6 +149,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const [clock, setClock] = useState(Date.now())
   const [selected, setSelected] = useState([])
   const [search, setSearch] = useState('')
+  const [accountLimit, setAccountLimit] = useState(120)
+  const [budgetDismissed, setBudgetDismissed] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [editKey, setEditKey] = useState(false)
   const [showKey, setShowKey] = useState(false)
@@ -184,7 +186,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
 
   const refreshStatus = useCallback(async () => {
     try {
-      const s = await Endpoints.aiStatus(12, false)
+      const s = await Endpoints.aiStatus(12, false, true)
       setStatus(s)
       return s
     } catch {
@@ -196,6 +198,10 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     const id = setInterval(() => setClock(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    setAccountLimit(120)
+  }, [search])
 
   useEffect(() => {
     let alive = true
@@ -269,6 +275,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     return `${a.first_name} ${a.last_name} ${a.username} ${a.phone}`.toLowerCase().includes(q)
   })
   const selectable = visibleAccounts.filter((a) => a.status === 'connected')
+  const listedAccounts = visibleAccounts.slice(0, accountLimit)
   const allSelected = selectable.length > 0 && selectable.every((a) => selected.includes(a.id))
   const toggle = (id) => setSelected((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
   const toggleAll = () => {
@@ -534,6 +541,12 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
     style: 'currency', currency: 'USD',
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })
+  const budgetError = allChats.find(
+    (c) => /budget/i.test(c.last_error || '') && /exceed/i.test(c.last_error || '')
+  )?.last_error || ''
+  const budgetStopped = allChats.filter(
+    (c) => /budget/i.test(c.last_error || '') && /exceed/i.test(c.last_error || '')
+  ).length
   const finishAt = status?.finish_at ? new Date(status.finish_at) : null
   const finishIn = finishAt ? Math.max(0, Math.floor((finishAt.getTime() - clock) / 1000)) : 0
   const finishBd = finishAt
@@ -565,6 +578,26 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           The first message usually takes 10 to 30 seconds.
         </p>
       </div>
+
+      {budgetError && !budgetDismissed && (
+        <div className="nb-note nb-note-err px-4 py-3">
+          <div className="flex items-start gap-2 flex-wrap">
+            <div className="font-semibold text-sm">AI Gateway budget exceeded</div>
+            <span className="nb-badge bg-brand-err">{budgetStopped} accounts stopped</span>
+            <button
+              className="nb-btn !py-1 !px-2 text-[10px] ml-auto"
+              onClick={() => setBudgetDismissed(true)}
+            >
+              Dismiss
+            </button>
+          </div>
+          <div className="text-[11px] text-muted mt-1.5 leading-5">
+            The AI Gateway key hit its budget limit. Increase the budget or replace the key,
+            then use <strong>Fill 100</strong> to resume the stopped accounts.
+          </div>
+          <div className="text-[9px] font-mono text-muted mt-1.5 break-all">{budgetError}</div>
+        </div>
+      )}
 
       {/* Gateway setup */}
       <div className="nb-card p-5">
@@ -744,7 +777,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[300px] overflow-auto mt-3 pr-1">
-            {visibleAccounts.map((a) => {
+            {listedAccounts.map((a) => {
               const isSelected = selected.includes(a.id)
               const disabled = a.status !== 'connected'
               const dailyCap = limitById[a.id] || dailyLimit
@@ -800,6 +833,14 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
               <div className="text-sm text-muted py-4">No accounts match this search.</div>
             )}
           </div>
+          {visibleAccounts.length > accountLimit && (
+            <button
+              className="nb-btn w-full mt-2 !py-1.5 !text-[11px]"
+              onClick={() => setAccountLimit((n) => n + 150)}
+            >
+              Show more ({visibleAccounts.length - accountLimit} remaining)
+            </button>
+          )}
 
         </div>
 

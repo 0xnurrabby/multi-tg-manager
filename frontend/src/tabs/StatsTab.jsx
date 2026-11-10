@@ -156,7 +156,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
 
   const loadStatus = useCallback(async () => {
     try {
-      const s = await Endpoints.aiStatus(2, false)
+      const s = await Endpoints.aiStatus(2, false, true)
       if (!alive.current) return
       setStatus(s)
       mergeLive(s.accounts)

@@ -791,7 +791,7 @@ class AIChatManager:
                         break
                     if not got:
                         bot_timeouts += 1
-                        if bot_timeouts >= 3 and follow_up_sent < 2:
+                        if bot_timeouts >= 3 and follow_up_sent < 4:
                             bot_timeouts = 0
                             follow_up_sent += 1
                             follow_up_pending = True

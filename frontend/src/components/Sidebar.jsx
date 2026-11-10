@@ -38,6 +38,7 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
   const [removeAllPassword, setRemoveAllPassword] = useState('')
   const [removeAllBusy, setRemoveAllBusy] = useState(false)
   const [goneOpen, setGoneOpen] = useState(false)
+  const [listLimit, setListLimit] = useState(250)
 
   // Banned accounts drop out of the active list (they live in Gone/Banned).
   // Serial numbers are the 1-based position in this active list.
@@ -47,6 +48,7 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
   const filtered = q
     ? active.filter((a) => `${a.first_name} ${a.last_name} ${a.username} ${a.phone}`.toLowerCase().includes(q))
     : active
+  const shown = filtered.slice(0, listLimit)
 
   async function confirmDelete() {
     const a = pendingDelete
@@ -119,7 +121,7 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
           className="nb-input !py-1.5 !text-xs"
           placeholder="Search name, @username or phone"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => { setQuery(e.target.value); setListLimit(250) }}
         />
       </div>
       <div className="flex-1 overflow-auto">
@@ -136,7 +138,7 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
             <div className="text-sm">Try another name, username or phone.</div>
           </div>
         )}
-        {filtered.map((a, i) => {
+        {shown.map((a, i) => {
           const sel = a.id === selectedId
           const serial = i + 1
           return (
@@ -189,6 +191,14 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
             </div>
           )
         })}
+        {filtered.length > listLimit && (
+          <button
+            className="nb-btn w-full !py-2 !text-[11px] mt-1"
+            onClick={() => setListLimit((n) => n + 250)}
+          >
+            Show more ({filtered.length - listLimit} remaining)
+          </button>
+        )}
       </div>
 
       {gone.length > 0 && (

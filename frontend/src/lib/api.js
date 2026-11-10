@@ -184,7 +184,7 @@ export const Endpoints = {
   aiSettings: () => api.get('/api/ai/settings'),
   saveAiSettings: (payload) => api.put('/api/ai/settings', payload),
   clearAiKey: () => api.del('/api/ai/settings'),
-  aiStatus: (limit = 30, includeMessages = true) => api.get('/api/ai/chat/status', { limit, include_messages: includeMessages }),
+  aiStatus: (limit = 30, includeMessages = true, compact = false) => api.get('/api/ai/chat/status', { limit, include_messages: includeMessages, compact }),
   aiDailyCounts: (accountIds) => api.post('/api/ai/chat/daily_counts', { account_ids: accountIds }),
   startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }, { 'X-AI-Manual': '1' }),
   sendAiCustom: (accountIds, message, onEvent) => streamNDJSON('/api/ai/chat/custom', { account_ids: accountIds, message }, onEvent),

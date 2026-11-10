@@ -158,6 +158,7 @@ async def clear_ai_key():
 
 @router.get("/chat/status")
 async def chat_status(limit: int = 30, include_messages: bool = True,
+                      compact: bool = False,
                       db: AsyncSession = Depends(get_db)):
     limit = max(2, min(int(limit or 30), 100))
     state = ai_manager.snapshot()
@@ -169,6 +170,8 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
     profiles = {p.account_id: p for p in res.scalars().all()}
     ids = set(state.keys()) | set(profiles.keys())
     ids &= set(accounts.keys())
+    if compact:
+        ids = {aid for aid, acc in accounts.items() if acc.status != "banned"}
     today = bd_day_key()
     recent_cutoff = datetime.utcnow() - timedelta(minutes=10)
     res = await db.execute(
@@ -197,10 +200,33 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
                 "daily_limit": int(prof.daily_limit or DAILY_LIMIT) if prof else DAILY_LIMIT,
                 "last_error": "Daily limit reached. Skipping this account until the next reset.",
             }
-        if not msgs and not st.get("running") and not st.get("last_error") and not st.get("daily_limit") and not limit_today:
+        if (
+            not compact
+            and not msgs
+            and not st.get("running")
+            and not st.get("last_error")
+            and not st.get("daily_limit")
+            and not limit_today
+        ):
+            continue
+        last_activity = st.get("last_activity") or (msgs[-1]["created_at"] if msgs else None)
+        if compact:
+            out.append({
+                "account_id": aid,
+                "running": bool(st.get("running")),
+                "status": st.get("status") or "stopped",
+                "daily_sent": int(st.get("daily_sent") or 0),
+                "daily_limit": int(
+                    st.get("daily_limit")
+                    or (prof.daily_limit if prof else 0)
+                    or DAILY_LIMIT
+                ),
+                "last_error": st.get("last_error") or "",
+                "last_activity": last_activity,
+                "turns_done": int(st.get("turns_done") or 0),
+            })
             continue
         fallback = ai_manager.persona_for(acc)
-        last_activity = st.get("last_activity") or (msgs[-1]["created_at"] if msgs else None)
         out.append({
             "account_id": aid,
             "phone": acc.phone,
@@ -269,7 +295,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
 
     # Message bodies are only needed for the cards visible on screen. Querying
     # 400+ accounts x N messages on every status poll made the local UI lag.
-    if include_messages:
+    if include_messages and not compact:
         for chat in out[:20]:
             aid = chat["account_id"]
             prof = profiles.get(aid)
