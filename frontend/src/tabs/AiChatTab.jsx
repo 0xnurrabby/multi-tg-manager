@@ -537,6 +537,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const limit50Count = allChats.filter((c) => (Number(c.daily_limit) || dailyLimit) === 50).length
   const limit100Count = allChats.filter((c) => (Number(c.daily_limit) || dailyLimit) === 100).length
   const otherLimitCount = allChats.length - limit50Count - limit100Count
+  const runTotalMessages = dailyTotal + (Number(status?.remaining_messages) || 0)
+  const runProgress = runTotalMessages > 0 ? Math.min(100, (dailyTotal / runTotalMessages) * 100) : 0
   const expectedEarning = dailyTotal * EARNING_PER_MESSAGE
   const earningText = expectedEarning.toLocaleString('en-US', {
     style: 'currency', currency: 'USD',
@@ -755,7 +757,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
                 </span>
                 <div className="font-semibold text-sm">{runningCount} chats running</div>
                 <div className="text-[10px] text-muted">
-                  {talkingCount} talking · {waitingCount} waiting · {status?.remaining_messages ?? 0} messages left
+                  {talkingCount} talking · {waitingCount} waiting
                 </div>
                 <div className="ml-auto flex items-center gap-2">
                   <button
@@ -771,6 +773,14 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
                   >
                     Stop all
                   </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 mt-1.5">
+                <div className="h-1.5 flex-1 rounded-full bg-[rgb(var(--surface)/0.75)] overflow-hidden">
+                  <div className="h-full rounded-full bg-brand-ok transition-all" style={{ width: `${runProgress}%` }} />
+                </div>
+                <div className="text-[9px] text-muted font-mono whitespace-nowrap">
+                  {dailyTotal.toLocaleString()} sent · {status?.remaining_messages ?? 0} left
                 </div>
               </div>
             </div>

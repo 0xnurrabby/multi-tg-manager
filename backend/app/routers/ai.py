@@ -281,10 +281,15 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
         if all(c["remaining_messages"] <= 0 for c in active_chats):
             finish_reason = "done"
             finish_at = now
+        elif rate_total > 0:
+            finish_in = max(0, int(remaining_total / rate_total * 60))
+            estimated = now + timedelta(seconds=finish_in)
+            finish_reason = "rate"
+            finish_at = estimated
         elif known_etas:
             max_eta = max(known_etas)
             estimated = now + timedelta(seconds=max_eta)
-            finish_reason = "limit"
+            finish_reason = "rate"
             finish_at = estimated
             finish_in = max(0, int((estimated - now).total_seconds()))
         else:

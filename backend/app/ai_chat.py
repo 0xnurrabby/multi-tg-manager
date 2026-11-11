@@ -19,6 +19,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, desc
+from sqlalchemy.exc import OperationalError
 from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
 
@@ -435,6 +436,7 @@ class AIChatManager:
             thread_name_prefix="ai-gateway",
         )
         self._init_sem = asyncio.Semaphore(max(1, settings.AI_INIT_CONCURRENCY))
+        self._db_write_lock = asyncio.Lock()
 
     # ---------- profiles ----------
     def _make_profile(self, account: Account) -> dict:
@@ -1108,26 +1110,35 @@ class AIChatManager:
         text = (text or "").strip()
         if not text:
             return
-        async with AsyncSessionLocal() as db:
-            if tg_msg_id is not None:
-                exists = await db.scalar(
-                    select(AiChatMessage.id).where(
-                        AiChatMessage.account_id == account_id,
-                        AiChatMessage.tg_msg_id == tg_msg_id,
-                    )
-                )
-                if exists:
+        async with self._db_write_lock:
+            for attempt in range(4):
+                try:
+                    async with AsyncSessionLocal() as db:
+                        if tg_msg_id is not None:
+                            exists = await db.scalar(
+                                select(AiChatMessage.id).where(
+                                    AiChatMessage.account_id == account_id,
+                                    AiChatMessage.tg_msg_id == tg_msg_id,
+                                )
+                            )
+                            if exists:
+                                return
+                        db.add(AiChatMessage(
+                            account_id=account_id,
+                            direction=direction,
+                            text=text,
+                            tg_msg_id=tg_msg_id,
+                            reply_to_text=reply_to_text,
+                            is_custom=bool(is_custom),
+                            created_at=datetime.utcnow(),
+                        ))
+                        await db.commit()
                     return
-            db.add(AiChatMessage(
-                account_id=account_id,
-                direction=direction,
-                text=text,
-                tg_msg_id=tg_msg_id,
-                reply_to_text=reply_to_text,
-                is_custom=bool(is_custom),
-                created_at=datetime.utcnow(),
-            ))
-            await db.commit()
+                except OperationalError as e:
+                    msg = str(e).lower()
+                    if ('locked' not in msg and 'busy' not in msg) or attempt == 3:
+                        raise
+                    await asyncio.sleep(0.2 * (attempt + 1))
 
     async def send_custom(self, accounts: list[Account], target: str, text: str) -> dict:
         sent: list[int] = []
