@@ -1001,6 +1001,8 @@ class AIChatManager:
             state["minute"] = minute
             if previous >= 3:
                 state["target"] = random.choice([1, 1, 2])
+            elif previous == 2:
+                state["target"] = random.choice([1, 2])
             elif previous <= 1:
                 state["target"] = random.choice([2, 3, 3])
             else:
@@ -1039,8 +1041,6 @@ class AIChatManager:
             state["minute"] = minute
         state["used"] += 1
         state["window"].append(now)
-        if state["used"] >= 3:
-            state["cooldown_until"] = now + random.uniform(70.0, 150.0)
 
     async def _paced_send(self, account_id: int, cli, entity, text: str,
                           reply_to=None, stop=None):
