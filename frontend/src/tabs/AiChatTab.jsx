@@ -151,6 +151,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const [search, setSearch] = useState('')
   const [accountLimit, setAccountLimit] = useState(120)
   const [budgetDismissed, setBudgetDismissed] = useState(false)
+  const [showRunControls, setShowRunControls] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [editKey, setEditKey] = useState(false)
   const [showKey, setShowKey] = useState(false)
@@ -727,7 +728,12 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           <div className="flex items-end justify-between gap-3 flex-wrap">
             <div>
               <div className="micro-label">Run queue</div>
-              <h2 className="display-title text-[20px] mt-1">Choose accounts</h2>
+              <div className="flex items-center gap-2 flex-wrap mt-1">
+                <h2 className="display-title text-[20px]">Choose accounts</h2>
+                {runningCount > 0 && (
+                  <span className="nb-badge bg-brand-ok">Running {runningCount}</span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <span className="micro-label">{selected.length} selected</span>
@@ -737,27 +743,62 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 mt-4 flex-wrap">
-            <button
-              className="nb-btn-pri"
-              onClick={fillDaily}
-              disabled={filling || busy || stopping || connectedAccounts.length === 0 || !settings?.has_key}
+          {runningCount > 0 && (
+            <div
+              className="mt-4 rounded-2xl border border-[color:var(--hairline)] px-3 py-2.5"
+              style={{ background: 'linear-gradient(120deg, rgb(var(--accent-mint) / 0.55), rgb(var(--accent-sky) / 0.4))' }}
             >
-              {filling ? 'Filling…' : `Fill 100 (${selected.length || `all ${connectedAccounts.length}`})`}
-            </button>
-            <button className="nb-btn" onClick={checkDaily} disabled={checkingDaily || filling}>
-              {checkingDaily ? 'Checking...' : 'Check today'}
-            </button>
-            <button className="nb-btn" onClick={runSelected} disabled={busy || filling || stopping || selected.length === 0 || !settings?.has_key}>
-              {busy ? 'Starting...' : `Run selected (${selected.length})`}
-            </button>
-            <button className="nb-btn-err" onClick={stopSelected} disabled={stopping || selected.length === 0}>
-              Stop selected
-            </button>
-            <button className="nb-btn" onClick={stopAll} disabled={stopping || runningCount === 0}>
-              Stop all
-            </button>
-          </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: 'rgb(var(--positive))' }} />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: 'rgb(var(--positive))' }} />
+                </span>
+                <div className="font-semibold text-sm">{runningCount} chats running</div>
+                <div className="text-[10px] text-muted">
+                  {talkingCount} talking · {waitingCount} waiting · {status?.remaining_messages ?? 0} messages left
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    className="nb-btn !py-1 !px-3 !text-[11px]"
+                    onClick={() => setShowRunControls((v) => !v)}
+                  >
+                    {showRunControls ? 'Hide controls' : 'Start more'}
+                  </button>
+                  <button
+                    className="nb-btn-err !py-1 !px-3 !text-[11px]"
+                    onClick={stopAll}
+                    disabled={stopping}
+                  >
+                    Stop all
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {(!runningCount || showRunControls) && (
+            <div className="flex items-center gap-2 mt-4 flex-wrap">
+              <button
+                className={runningCount > 0 ? 'nb-btn' : 'nb-btn-pri'}
+                onClick={fillDaily}
+                disabled={filling || busy || stopping || connectedAccounts.length === 0 || !settings?.has_key}
+              >
+                {filling ? 'Filling…' : `${runningCount > 0 ? 'Fill remaining' : 'Fill 100'} (${selected.length || `all ${connectedAccounts.length}`})`}
+              </button>
+              <button className="nb-btn" onClick={checkDaily} disabled={checkingDaily || filling}>
+                {checkingDaily ? 'Checking...' : 'Check today'}
+              </button>
+              <button className="nb-btn" onClick={runSelected} disabled={busy || filling || stopping || selected.length === 0 || !settings?.has_key}>
+                {busy ? 'Starting...' : `Run selected (${selected.length})`}
+              </button>
+              <button className="nb-btn-err" onClick={stopSelected} disabled={stopping || selected.length === 0}>
+                Stop selected
+              </button>
+              <button className="nb-btn" onClick={stopAll} disabled={stopping || runningCount === 0}>
+                Stop all
+              </button>
+            </div>
+          )}
           <div className="text-[10px] text-muted mt-2">
             Fill 100 counts each account's outgoing messages to the bot today, then sends only the rest.
             With no selection it fills all connected accounts. Counts reset every day at 6:00 AM Bangladesh.

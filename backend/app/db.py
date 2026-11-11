@@ -14,7 +14,15 @@ _is_sqlite = settings.DB_URL.startswith("sqlite")
 # "database is locked".
 _connect_args = {"timeout": 30} if _is_sqlite else {}
 
-engine = create_async_engine(settings.DB_URL, echo=False, future=True, connect_args=_connect_args)
+engine = create_async_engine(
+    settings.DB_URL,
+    echo=False,
+    future=True,
+    connect_args=_connect_args,
+    pool_size=50,
+    max_overflow=100,
+    pool_timeout=60,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 if _is_sqlite:
