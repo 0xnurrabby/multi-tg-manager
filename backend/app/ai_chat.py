@@ -7,7 +7,6 @@ and model are configured from the dashboard and stored locally in
 """
 from __future__ import annotations
 import asyncio
-from collections import deque
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import json
@@ -438,7 +437,6 @@ class AIChatManager:
         )
         self._init_sem = asyncio.Semaphore(max(1, settings.AI_INIT_CONCURRENCY))
         self._db_write_lock = asyncio.Lock()
-        self._pace: dict[int, dict] = {}
 
     # ---------- profiles ----------
     def _make_profile(self, account: Account) -> dict:
@@ -599,7 +597,6 @@ class AIChatManager:
         aid = account.id
         if self.is_running(aid):
             return False
-        self._pace.pop(aid, None)
         stop = asyncio.Event()
         if profile is None:
             profile = await self.get_profile(account)
@@ -911,11 +908,11 @@ class AIChatManager:
                     quote_msg = self._choose_quote(history, reply)
                 reply_to = quote_msg.tg_msg_id if quote_msg else None
                 try:
-                    sent = await self._paced_send(aid, cli, entity, reply, reply_to=reply_to, stop=stop)
+                    sent = await self._send_paced(cli, entity, reply, reply_to=reply_to, stop=stop)
                 except Exception:
                     # The quoted message may have been deleted; send plain text.
                     quote_msg = None
-                    sent = await self._paced_send(aid, cli, entity, reply, stop=stop)
+                    sent = await self._send_paced(cli, entity, reply, stop=stop)
                 if sent is None:
                     break
                 sent_window.append(loop.time())
@@ -974,85 +971,6 @@ class AIChatManager:
         if stop is not None and stop.is_set():
             return None
         return await cli.send_message(entity, text, reply_to=reply_to)
-
-    def _pace_state(self, account_id: int) -> dict:
-        state = self._pace.get(account_id)
-        if state is None:
-            state = {
-                "minute": -1,
-                "used": 0,
-                "prev_used": 0,
-                "target": random.choice([1, 2, 2, 3]),
-                "window": deque(),
-                "cooldown_until": 0.0,
-            }
-            self._pace[account_id] = state
-        return state
-
-    def _pace_delay(self, account_id: int) -> float:
-        loop = asyncio.get_running_loop()
-        now = loop.time()
-        state = self._pace_state(account_id)
-        minute = int(now // 60)
-        if minute != state["minute"]:
-            previous = state["used"]
-            state["prev_used"] = previous
-            state["used"] = 0
-            state["minute"] = minute
-            if previous >= 3:
-                state["target"] = random.choice([1, 1, 2])
-            elif previous == 2:
-                state["target"] = random.choice([1, 2])
-            elif previous <= 1:
-                state["target"] = random.choice([2, 3, 3])
-            else:
-                state["target"] = random.choice([1, 2, 3, 3])
-
-        window = state["window"]
-        while window and window[0] <= now - 60:
-            window.popleft()
-
-        if now < state["cooldown_until"]:
-            return max(0.5, state["cooldown_until"] - now + random.uniform(0.5, 8.0))
-        if len(window) >= 3:
-            return max(0.5, 60 - (now - window[0]) + random.uniform(1.0, 12.0))
-        if state["used"] >= state["target"]:
-            next_minute = (minute + 1) * 60
-            return max(0.5, next_minute - now + random.uniform(0.5, 20.0))
-        if state["used"] == 0:
-            return random.uniform(4.0, 18.0)
-        return random.uniform(10.0, 25.0)
-
-    async def _pace_wait(self, account_id: int, stop: asyncio.Event):
-        if stop.is_set():
-            return
-        delay = self._pace_delay(account_id)
-        if delay > 0.05:
-            await self._sleep_or_stop(stop, delay)
-
-    def _record_send(self, account_id: int):
-        loop = asyncio.get_running_loop()
-        now = loop.time()
-        state = self._pace_state(account_id)
-        minute = int(now // 60)
-        if minute != state["minute"]:
-            state["prev_used"] = state["used"]
-            state["used"] = 0
-            state["minute"] = minute
-        state["used"] += 1
-        state["window"].append(now)
-
-    async def _paced_send(self, account_id: int, cli, entity, text: str,
-                          reply_to=None, stop=None):
-        if stop is not None and stop.is_set():
-            return None
-        await self._pace_wait(account_id, stop)
-        if stop is not None and stop.is_set():
-            return None
-        sent = await self._send_paced(cli, entity, text, reply_to=reply_to, stop=stop)
-        if sent is not None:
-            self._record_send(account_id)
-        return sent
 
     @staticmethod
     def _choose_quote(history, reply: str):
