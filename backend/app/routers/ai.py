@@ -272,8 +272,26 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
     if reset <= now:
         reset = reset + timedelta(days=1)
     remaining_total = sum(c["remaining_messages"] for c in active_chats)
-    rate_total = round(sum(c["rate_per_min"] for c in active_chats), 2)
-    known_etas = [c["eta_seconds"] for c in active_chats if c["eta_seconds"] is not None]
+    active_ids = {c["account_id"] for c in active_chats}
+    recent_total = sum(recent_counts.get(aid, 0) for aid in active_ids)
+    starts = []
+    for aid in active_ids:
+        raw = state.get(aid, {}).get("started_at")
+        if not raw:
+            continue
+        try:
+            started = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            continue
+        if started.tzinfo is not None:
+            started = started.astimezone(timezone.utc).replace(tzinfo=None)
+        starts.append(started)
+    if starts:
+        elapsed_min = max(1.0, (now.replace(tzinfo=None) - min(starts)).total_seconds() / 60.0)
+        rate_window = min(10.0, elapsed_min)
+    else:
+        rate_window = 10.0
+    rate_total = round(recent_total / rate_window, 2)
     finish_at = None
     finish_in = 0
     finish_reason = "idle"
@@ -286,12 +304,6 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
             estimated = now + timedelta(seconds=finish_in)
             finish_reason = "rate"
             finish_at = estimated
-        elif known_etas:
-            max_eta = max(known_etas)
-            estimated = now + timedelta(seconds=max_eta)
-            finish_reason = "rate"
-            finish_at = estimated
-            finish_in = max(0, int((estimated - now).total_seconds()))
         else:
             finish_reason = "calculating"
 
@@ -331,6 +343,7 @@ async def chat_status(limit: int = 30, include_messages: bool = True,
         "finish_reason": finish_reason,
         "remaining_messages": remaining_total,
         "rate_per_min": rate_total,
+        "rate_window_minutes": round(rate_window, 1),
         "accounts_at_limit": sum(1 for c in out if c["status"] == "limit"),
         "reset_at": reset.isoformat(),
     }

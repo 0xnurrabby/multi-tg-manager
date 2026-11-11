@@ -550,14 +550,22 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const budgetStopped = allChats.filter(
     (c) => /budget/i.test(c.last_error || '') && /exceed/i.test(c.last_error || '')
   ).length
-  const finishAt = status?.finish_at ? new Date(status.finish_at) : null
+  const finishReason = status?.finish_reason || 'idle'
+  const aggregateFinishIn = (
+    Number(status?.remaining_messages) > 0 && Number(status?.rate_per_min) > 0
+  )
+    ? Math.round(Number(status.remaining_messages) / Number(status.rate_per_min) * 60)
+    : null
+  const backendFinishAt = status?.finish_at ? new Date(status.finish_at) : null
+  const finishAt = finishReason === 'rate' && aggregateFinishIn != null
+    ? new Date(clock + aggregateFinishIn * 1000)
+    : backendFinishAt
   const finishIn = finishAt ? Math.max(0, Math.floor((finishAt.getTime() - clock) / 1000)) : 0
   const finishBd = finishAt
     ? new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'short',
       }).format(finishAt)
     : ''
-  const finishReason = status?.finish_reason || 'idle'
   const resetAt = status?.reset_at ? new Date(status.reset_at) : null
   const crossesReset = !!(finishAt && resetAt && finishAt > resetAt)
   const finishTitle =
@@ -975,6 +983,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             )}
             <div className="text-[10px] text-muted font-mono mt-1">
               {status?.remaining_messages ?? 0} messages remaining ? {status?.rate_per_min ?? 0}/min
+            </div>
+            <div className="text-[9px] text-muted mt-1">
+              ETA uses active accounts and a {Math.round(Number(status?.rate_window_minutes) || 10)}-min average.
             </div>
             {crossesReset && (
               <div className="text-[10px] text-muted mt-1">
