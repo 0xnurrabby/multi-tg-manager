@@ -3,19 +3,12 @@ import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import ProgressModal from '../components/ProgressModal.jsx'
 import { useBulkProgress } from '../lib/useBulkProgress'
+import { fmtTimeOnly as fmtClock, formatInTimeZone, getTimeZone } from '../lib/util'
 
 const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash-0731'
 const DEFAULT_TARGET = '@folkapp_bot'
 const EARNING_PER_MESSAGE = 0.003
 const TONES = ['--accent-sun', '--accent-mint', '--accent-sky', '--accent-peach', '--accent-rose']
-
-function fmtClock(iso) {
-  if (!iso) return ''
-  const norm = /[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z'
-  const d = new Date(norm)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
 
 function fmtDuration(seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0))
@@ -563,7 +556,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const finishIn = finishAt ? Math.max(0, Math.floor((finishAt.getTime() - clock) / 1000)) : 0
   const finishBd = finishAt
     ? new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Dhaka', dateStyle: 'medium', timeStyle: 'short',
+        timeZone: getTimeZone(), dateStyle: 'medium', timeStyle: 'short',
       }).format(finishAt)
     : ''
   const resetAt = status?.reset_at ? new Date(status.reset_at) : null
@@ -923,7 +916,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="flex justify-between gap-2"><span>Messages today</span><span className="font-mono text-ink">{dailyTotal}</span></div>
             <div className="flex justify-between gap-2"><span>At daily limit</span><span className="font-mono text-ink">{dailyFull} accounts</span></div>
             <div className="flex justify-between gap-2"><span>Bot limit reached</span><span className="font-mono text-ink">{limitCount} accounts</span></div>
-            <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">6:00 AM Bangladesh</span></div>
+            <div className="flex justify-between gap-2"><span>Daily reset</span><span className="font-mono text-ink">{status?.reset_at ? formatInTimeZone(status.reset_at, { hour: '2-digit', minute: '2-digit' }) : '6:00 AM Bangladesh'}</span></div>
           </div>
 
           <div className="mt-4">
@@ -978,7 +971,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
             <div className="display-title text-[26px] mt-1 tabular-nums">{finishTitle}</div>
             {finishAt && finishReason !== 'done' && (
               <div className="text-[11px] text-muted mt-1">
-                BD time: <span className="font-mono text-ink">{finishBd}</span>
+                Local time: <span className="font-mono text-ink">{finishBd}</span>
               </div>
             )}
             <div className="text-[10px] text-muted font-mono mt-1">

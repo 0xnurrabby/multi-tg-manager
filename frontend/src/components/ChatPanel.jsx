@@ -1,14 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-
-function fmtTime(iso) {
-  if (!iso) return ''
-  const norm = /[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z'
-  const d = new Date(norm)
-  if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
+import { fmtTimeOnly as fmtChatTime } from '../lib/util'
 
 function kindBadge(kind, isBot) {
   const label = isBot ? 'bot' : (kind || 'chat')
@@ -172,7 +165,7 @@ export default function ChatPanel({ account, className = '' }) {
                   ? <span className="whitespace-pre-wrap">{m.text}</span>
                   : <span className="italic opacity-70">{m.media || '[empty]'}</span>}
                 <div className={'text-[9px] mt-1 text-right font-mono ' + (m.out ? 'text-paper/55' : 'text-muted')}>
-                  {fmtTime(m.date)}
+                  {fmtChatTime(m.date)}
                 </div>
               </div>
             </div>

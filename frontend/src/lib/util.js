@@ -4,12 +4,64 @@ export function initials(first, last) {
   return (a + b).toUpperCase() || '?'
 }
 
-export function fmtTime(iso) {
-  if (!iso) return ''
+export const DEFAULT_TIME_ZONE = 'Asia/Dhaka'
+const TIME_ZONE_KEY = 'tg_manager_timezone'
+
+export function browserTimeZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || DEFAULT_TIME_ZONE } catch { return DEFAULT_TIME_ZONE }
+}
+
+export function getTimeZoneChoice() {
   try {
-    const d = new Date(iso)
-    return d.toLocaleString(undefined, { hour: '2-digit', minute: '2-digit', month: 'short', day: '2-digit' })
+    const value = localStorage.getItem(TIME_ZONE_KEY)
+    return value || DEFAULT_TIME_ZONE
+  } catch { return DEFAULT_TIME_ZONE }
+}
+
+export function getTimeZone() {
+  const choice = getTimeZoneChoice()
+  if (choice === 'auto') {
+    const tz = browserTimeZone()
+    return (!tz || tz === 'UTC' || tz === 'Etc/UTC') ? DEFAULT_TIME_ZONE : tz
+  }
+  return choice || DEFAULT_TIME_ZONE
+}
+
+export function setTimeZoneChoice(value) {
+  try { localStorage.setItem(TIME_ZONE_KEY, value || DEFAULT_TIME_ZONE) } catch {}
+}
+
+export function parseApiDate(value) {
+  if (!value) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  let text = String(value).trim()
+  if (!text) return null
+  if (/^\d{4}-\d\d-\d\d \d/.test(text)) text = text.replace(' ', 'T')
+  if (!/[zZ]|[+-]\d\d:?\d\d$/.test(text)) text += 'Z'
+  const d = new Date(text)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+export function formatInTimeZone(value, options = {}) {
+  const d = parseApiDate(value)
+  if (!d) return ''
+  try {
+    return d.toLocaleString('en-GB', { timeZone: getTimeZone(), ...options })
   } catch { return '' }
+}
+
+export function fmtTime(iso) {
+  return formatInTimeZone(iso, {
+    hour: '2-digit', minute: '2-digit', month: 'short', day: '2-digit',
+  })
+}
+
+export function fmtTimeOnly(iso) {
+  return formatInTimeZone(iso, { hour: '2-digit', minute: '2-digit' })
+}
+
+export function fmtDate(iso) {
+  return formatInTimeZone(iso, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 export function colorForString(s) {

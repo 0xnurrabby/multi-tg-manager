@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { CopyButton } from '../lib/CopyButton'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
+import { fmtDate } from '../lib/util'
 import AccountAvatar from './AccountAvatar'
 import ConfirmModal from './ConfirmModal'
 import Icon from './Icon'
@@ -24,7 +25,7 @@ function ago(iso) {
   const m = s / 60; if (m < 60) return `${Math.floor(m)}m ago`
   const h = m / 60; if (h < 24) return `${Math.floor(h)}h ago`
   const d = h / 24; if (d < 30) return `${Math.floor(d)}d ago`
-  return new Date(norm).toLocaleDateString()
+  return fmtDate(norm)
 }
 
 const goneName = (g) => `${g.first_name || ''} ${g.last_name || ''}`.trim() || g.phone

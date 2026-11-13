@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Endpoints } from '../lib/api'
-import { fmtTime } from '../lib/util'
+import { fmtTime, fmtTimeOnly } from '../lib/util'
 import { useToast } from '../lib/toast.jsx'
 
 const DAILY_LIMIT = 100
@@ -311,7 +311,7 @@ export default function StatsTab({ accounts = [], onOpenChat }) {
             <span><span className="font-mono text-ink">{remaining.toLocaleString()}</span> remaining</span>
             <span><span className="font-mono text-ink">{active}</span> active</span>
             <span>Reset {resetText}</span>
-            <span className="ml-auto">Counts: {lastSync ? lastSync.toLocaleTimeString() : 'waiting for Telegram...'}</span>
+            <span className="ml-auto">Counts: {lastSync ? fmtTimeOnly(lastSync) : 'waiting for Telegram...'}</span>
           </div>
         </div>
       </section>

@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
+import { DEFAULT_TIME_ZONE, browserTimeZone, getTimeZoneChoice, setTimeZoneChoice } from '../lib/util'
 
 export default function SettingsTab() {
   const toast = useToast()
   const [s, setS] = useState(null)
   const [busy, setBusy] = useState(false)
   const [exportingSessions, setExportingSessions] = useState(false)
+  const [timeZone, setTimeZone] = useState(getTimeZoneChoice())
 
   useEffect(() => {
     Endpoints.getSettings().then(setS).catch((e) => toast.error(e.message))
@@ -111,6 +113,38 @@ export default function SettingsTab() {
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="nb-card p-5">
+        <div className="micro-label">Display</div>
+        <h3 className="display-title text-[20px] mt-1 mb-2">Time zone</h3>
+        <p className="text-sm text-muted mb-4">
+          Default is Bangladesh (Asia/Dhaka). Choose Auto to use this browser's time zone,
+          or pick the country where you are using TG Manager.
+        </p>
+        <select
+          className="nb-input"
+          value={timeZone}
+          onChange={(e) => {
+            const value = e.target.value
+            setTimeZone(value)
+            setTimeZoneChoice(value)
+            toast.success(value === 'auto' ? `Using browser time: ${browserTimeZone()}` : `Time zone: ${value}`)
+            setTimeout(() => window.location.reload(), 350)
+          }}
+        >
+          <option value="auto">Auto ? {browserTimeZone()}</option>
+          <option value={DEFAULT_TIME_ZONE}>Bangladesh ? Asia/Dhaka</option>
+          {(() => {
+            let zones = []
+            try { zones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : [] } catch {}
+            if (!zones.length) zones = ['Asia/Kolkata', 'Asia/Karachi', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney', 'UTC']
+            return zones
+              .filter((z) => z !== DEFAULT_TIME_ZONE && z !== 'UTC')
+              .map((z) => <option key={z} value={z}>{z}</option>)
+          })()}
+        </select>
+        <p className="text-xs text-muted mt-2">All message timestamps and ETA times use this time zone.</p>
       </div>
 
       <div className="nb-card p-5">
