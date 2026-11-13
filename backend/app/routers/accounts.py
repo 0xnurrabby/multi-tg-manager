@@ -223,10 +223,7 @@ async def import_sessions(files: list[UploadFile] = File(...)):
     if not files:
         raise HTTPException(400, "No session files uploaded")
 
-    results: list[dict] = []
-    success = failed = skipped = 0
-
-    for idx, upload in enumerate(files, start=1):
+    async def one(upload: UploadFile, idx: int) -> dict:
         filename = upload.filename or f"session_{idx}.session"
         row = {
             "filename": filename,
@@ -238,85 +235,73 @@ async def import_sessions(files: list[UploadFile] = File(...)):
         }
         temp_base = ""
         promoted = False
-
         try:
             if not filename.lower().endswith(".session"):
                 row["status"] = "skipped"
                 row["detail"] = "Only .session files can be imported"
-                skipped += 1
-                results.append(row)
-                continue
-
+                return row
             data = await upload.read()
             if not data:
                 row["status"] = "skipped"
                 row["detail"] = "File is empty"
-                skipped += 1
-                results.append(row)
-                continue
-
+                return row
             with tempfile.NamedTemporaryFile(prefix="mtm_import_", suffix=".session", delete=False) as tmp:
                 tmp.write(data)
                 temp_base = str(Path(tmp.name).with_suffix(""))
 
-            me, phone = await manager.inspect_imported_session(temp_base)
-            display_name = f"{me.first_name or ''} {me.last_name or ''}".strip() or phone
+            async with manager._import_sem:
+                me, phone = await manager.inspect_imported_session(temp_base)
             row["phone"] = phone
-            row["name"] = display_name
+            row["name"] = f"{me.first_name or ''} {me.last_name or ''}".strip() or phone
 
-            async with AsyncSessionLocal() as db:
-                res = await db.execute(select(Account).where(Account.phone == phone))
-                acc = res.scalar_one_or_none()
-                replacing = bool(acc)
-
-                if acc and manager.get(acc.id):
-                    await manager.stop_client(acc.id)
-
-                session_file = await manager.promote_imported_session(temp_base, phone, me)
-                promoted = True
-
-                if not acc:
-                    acc = Account(
-                        phone=phone,
-                        tg_user_id=me.id,
-                        first_name=me.first_name or "",
-                        last_name=me.last_name or "",
-                        username=me.username or "",
-                        session_file=session_file,
-                        status="connected",
-                    )
-                    db.add(acc)
-                else:
-                    acc.tg_user_id = me.id
-                    acc.first_name = me.first_name or ""
-                    acc.last_name = me.last_name or ""
-                    acc.username = me.username or ""
-                    acc.session_file = session_file
-                    acc.status = "connected"
-
-                await db.commit()
-                await db.refresh(acc)
-                row["account_id"] = acc.id
-
-                detail = "Updated existing account" if replacing else "Imported"
-                try:
-                    await manager.start_client(acc)
-                except Exception as start_err:
-                    detail += f"; saved but could not start now: {_import_error(start_err)}"
-
-                row["status"] = "ok"
-                row["detail"] = detail
-                success += 1
+            async with manager._import_db_lock:
+                async with AsyncSessionLocal() as db:
+                    res = await db.execute(select(Account).where(Account.phone == phone))
+                    acc = res.scalar_one_or_none()
+                    replacing = bool(acc)
+                    if acc and manager.get(acc.id):
+                        await manager.stop_client(acc.id)
+                    session_file = await manager.promote_imported_session(temp_base, phone, me)
+                    promoted = True
+                    if not acc:
+                        acc = Account(
+                            phone=phone,
+                            tg_user_id=me.id,
+                            first_name=me.first_name or "",
+                            last_name=me.last_name or "",
+                            username=me.username or "",
+                            session_file=session_file,
+                            status="connected",
+                        )
+                        db.add(acc)
+                    else:
+                        acc.tg_user_id = me.id
+                        acc.first_name = me.first_name or ""
+                        acc.last_name = me.last_name or ""
+                        acc.username = me.username or ""
+                        acc.session_file = session_file
+                        acc.status = "connected"
+                    await db.commit()
+                    await db.refresh(acc)
+                    row["account_id"] = acc.id
+                    row["status"] = "ok"
+                    row["detail"] = (
+                        "Updated existing account" if replacing else "Imported"
+                    ) + "; connecting in background"
+                    manager._schedule_client_start(acc)
+            return row
         except Exception as e:
-            failed += 1
             row["status"] = "failed"
             row["detail"] = _import_error(e)
+            return row
         finally:
             if temp_base and not promoted:
                 manager._remove_session_files(temp_base)
 
-        results.append(row)
-
+    results = await asyncio.gather(*(one(upload, i) for i, upload in enumerate(files, start=1)))
+    success = sum(1 for r in results if r.get("status") == "ok")
+    failed = sum(1 for r in results if r.get("status") == "failed")
+    skipped = sum(1 for r in results if r.get("status") == "skipped")
     return {
         "ok": True,
         "total": len(files),

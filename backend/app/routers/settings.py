@@ -114,7 +114,7 @@ def _build_session_zip(accounts: list[Account]) -> tuple[str, int]:
                 if not source.exists():
                     continue
                 safe = re.sub(r"[^0-9A-Za-z_.-]", "_", acc.phone or str(acc.id))
-                arcname = f"sessions/{acc.id}_{safe}.session"
+                arcname = f"{acc.id}_{safe}.session"
                 snap = Path(work) / f"{acc.id}.session"
                 try:
                     _session_snapshot(source, snap)

@@ -129,6 +129,10 @@ class TgClientManager:
         self._ai_events: dict[int, asyncio.Event] = {}
         self._session_scan_lock = asyncio.Lock()
         self._session_scan_seen: dict[str, tuple[int, int]] = {}
+        self._import_sem = asyncio.Semaphore(32)
+        self._import_db_lock = asyncio.Lock()
+        self._import_start_sem = asyncio.Semaphore(40)
+        self._import_start_tasks: set[asyncio.Task] = set()
 
     def set_loop(self, loop):
         self._loop = loop
@@ -272,6 +276,18 @@ class TgClientManager:
         msg = str(e)
         return f"{type(e).__name__}: {msg[:140]}" if msg else type(e).__name__
 
+    def _schedule_client_start(self, acc: Account):
+        async def run():
+            async with self._import_start_sem:
+                try:
+                    await self.start_client(acc)
+                except Exception as e:
+                    log.warning("imported account %s could not start: %s", acc.id, e)
+
+        task = asyncio.create_task(run(), name=f"import-start-{acc.id}")
+        self._import_start_tasks.add(task)
+        task.add_done_callback(self._import_start_tasks.discard)
+
     @staticmethod
     def _is_importable_session_file(path: Path) -> bool:
         if path.suffix.lower() != ".session":
@@ -286,9 +302,9 @@ class TgClientManager:
     async def sync_session_folder(self, force: bool = False) -> dict:
         """Discover authorized .session files pasted into the sessions folder.
 
-        This fills missing Account rows without asking for a login code. It does
-        not create a new Telegram auth key; it only reuses session files that are
-        already authorized.
+        Network inspection is parallel; DB writes are serialized. Clients for
+        newly imported accounts connect in the background, so a 1000-session
+        import does not wait for every Telegram connection before returning.
         """
         async with self._session_scan_lock:
             session_files = [
@@ -308,46 +324,26 @@ class TgClientManager:
                     except Exception:
                         pass
 
-            success = failed = skipped = 0
             results: list[dict] = []
+            tasks: list[asyncio.Task] = []
 
-            for path in session_files:
-                row = {
-                    "filename": path.name,
-                    "phone": "",
-                    "name": "",
-                    "account_id": None,
-                    "status": "failed",
-                    "detail": "",
-                }
-
-                try:
-                    resolved = str(path.resolve()).lower()
-                    if resolved in known_paths:
-                        if force:
-                            row["status"] = "skipped"
-                            row["detail"] = "Already added"
-                            skipped += 1
-                            results.append(row)
-                        continue
-
-                    stat = path.stat()
-                    signature = (int(stat.st_size), int(stat.st_mtime_ns))
-                    if not force and self._session_scan_seen.get(resolved) == signature:
-                        continue
-                    self._session_scan_seen[resolved] = signature
-
-                    session_base = str(path.with_suffix(""))
-                    me, phone = await self.inspect_imported_session(session_base)
-                    display_name = f"{me.first_name or ''} {me.last_name or ''}".strip() or phone
-                    row["phone"] = phone
-                    row["name"] = display_name
-
+            async def one(path: Path, row: dict):
+                async with self._import_sem:
+                    try:
+                        me, phone = await self.inspect_imported_session(str(path.with_suffix("")))
+                    except Exception as e:
+                        row["status"] = "failed"
+                        row["detail"] = self._session_error_detail(e)
+                        return row
+                display_name = f"{me.first_name or ''} {me.last_name or ''}".strip() or phone
+                row["phone"] = phone
+                row["name"] = display_name
+                resolved = str(path.resolve()).lower()
+                async with self._import_db_lock:
                     async with AsyncSessionLocal() as db:
                         res = await db.execute(select(Account).where(Account.phone == phone))
                         acc = res.scalar_one_or_none()
                         replacing = bool(acc)
-
                         if acc:
                             candidate_paths = []
                             for base in self._session_path_candidates(acc):
@@ -355,17 +351,17 @@ class TgClientManager:
                                     candidate_paths.append(str(Path(base + ".session").resolve()).lower())
                                 except Exception:
                                     pass
-                            has_existing_file = any(Path(base + ".session").exists() for base in self._session_path_candidates(acc))
+                            has_existing_file = any(
+                                Path(base + ".session").exists()
+                                for base in self._session_path_candidates(acc)
+                            )
                             if resolved not in candidate_paths and has_existing_file:
                                 row["status"] = "skipped"
                                 row["detail"] = "Account already exists from another session file"
                                 row["account_id"] = acc.id
-                                skipped += 1
-                                results.append(row)
-                                continue
+                                return row
                             if self.get(acc.id):
                                 await self.stop_client(acc.id)
-
                         session_file = path.stem
                         if not acc:
                             acc = Account(
@@ -385,28 +381,45 @@ class TgClientManager:
                             acc.username = me.username or ""
                             acc.session_file = session_file
                             acc.status = "connected"
-
                         await db.commit()
                         await db.refresh(acc)
                         row["account_id"] = acc.id
+                        row["status"] = "ok"
+                        row["detail"] = (
+                            "Updated from sessions folder" if replacing else "Imported from sessions folder"
+                        ) + "; connecting in background"
+                        self._schedule_client_start(acc)
+                        return row
 
-                    detail = "Updated from sessions folder" if replacing else "Imported from sessions folder"
-                    try:
-                        await self.start_client(acc)
-                    except Exception as start_err:
-                        detail += f"; saved but could not start now: {self._session_error_detail(start_err)}"
+            for path in session_files:
+                row = {
+                    "filename": path.name,
+                    "phone": "",
+                    "name": "",
+                    "account_id": None,
+                    "status": "failed",
+                    "detail": "",
+                }
+                resolved = str(path.resolve()).lower()
+                if resolved in known_paths:
+                    if force:
+                        row["status"] = "skipped"
+                        row["detail"] = "Already added"
+                        results.append(row)
+                    continue
+                stat = path.stat()
+                signature = (int(stat.st_size), int(stat.st_mtime_ns))
+                if not force and self._session_scan_seen.get(resolved) == signature:
+                    continue
+                self._session_scan_seen[resolved] = signature
+                tasks.append(asyncio.create_task(one(path, row)))
 
-                    row["status"] = "ok"
-                    row["detail"] = detail
-                    success += 1
-                    results.append(row)
-                    known_paths.add(resolved)
-                except Exception as e:
-                    row["status"] = "failed"
-                    row["detail"] = self._session_error_detail(e)
-                    failed += 1
-                    results.append(row)
+            if tasks:
+                results.extend(await asyncio.gather(*tasks))
 
+            success = sum(1 for r in results if r.get("status") == "ok")
+            failed = sum(1 for r in results if r.get("status") == "failed")
+            skipped = sum(1 for r in results if r.get("status") == "skipped")
             return {
                 "ok": True,
                 "total": len(session_files),
