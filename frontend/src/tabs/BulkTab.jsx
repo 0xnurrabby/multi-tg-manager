@@ -154,20 +154,27 @@ export default function BulkTab({ accounts, onDone }) {
   function removePhoto(i) { setPhotos((cur) => cur.filter((_, j) => j !== i)) }
   function clearPhotos() { setPhotos([]) }
 
+  const isZipFile = (f) => /\.zip$/i.test(f.name || '')
+  const imagePhotos = useMemo(() => photos.filter((f) => !isZipFile(f)), [photos])
+  const zipFiles = useMemo(() => photos.filter(isZipFile), [photos])
   const photoThumbs = useMemo(
-    () => photos.map((f) => ({ name: f.name, size: f.size, url: URL.createObjectURL(f) })),
-    [photos]
+    () => imagePhotos.map((f) => ({ name: f.name, size: f.size, url: URL.createObjectURL(f) })),
+    [imagePhotos]
   )
 
   async function applyPhoto() {
-    if (photos.length === 0) { toast.error('Pick at least one photo'); return }
+    if (photos.length === 0) { toast.error('Pick at least one photo or ZIP'); return }
     if (ids.length === 0) { toast.error('Pick accounts'); return }
-    const usable = Math.min(photos.length, ids.length)
-    const extra = photos.length > ids.length ? ` (${photos.length - ids.length} extra photos ignored)` : ''
-    const missing = ids.length > photos.length ? ` (${ids.length - photos.length} accounts skipped, no photo)` : ''
-    if (!confirm(`Apply ${usable} photo(s) to ${ids.length} accounts in order?${extra}${missing}`)) return
+    const hasZip = zipFiles.length > 0
+    const usable = hasZip ? ids.length : Math.min(photos.length, ids.length)
+    const extra = !hasZip && photos.length > ids.length ? ` (${photos.length - ids.length} extra photos ignored)` : ''
+    const missing = !hasZip && ids.length > photos.length ? ` (${ids.length - photos.length} accounts skipped, no photo)` : ''
+    if (!confirm(
+      `Apply ${hasZip ? `ZIP photos (up to ${ids.length})` : `${usable} photo(s)`} to ${ids.length} accounts in order?${extra}${missing}\n\n` +
+      (hasZip ? 'ZIP images are sorted by filename; extra images are ignored.' : '')
+    )) return
     setBusy(true)
-    await run(`Bulk Photo (${usable} of ${ids.length})`, (onEvent) => Endpoints.bulkPhoto(ids, photos, onEvent))
+    await run(`Bulk Photo (${hasZip ? `ZIP ? ${ids.length}` : `${usable} of ${ids.length}`})`, (onEvent) => Endpoints.bulkPhoto(ids, photos, onEvent))
     setBusy(false)
     onDone?.()
   }
@@ -184,8 +191,9 @@ export default function BulkTab({ accounts, onDone }) {
               <div className="micro-label">AI profile studio</div>
               <h3 className="display-title text-[22px] mt-1">Name + username, automatically</h3>
               <p className="text-[12px] text-muted mt-2 max-w-[62ch] leading-5">
-                Random-country human names, posh name-based usernames, Telegram availability
-                checks, and up to 5 username tries per account. Uses the AI provider model and key from Settings.
+                Names follow the account's phone country, existing names are replaced, duplicates are
+                avoided, and usernames are derived from the generated name. Telegram availability
+                checks and up to 5 username tries per account. Uses the AI provider model and key from Settings.
               </p>
             </div>
             <span className={'nb-badge ' + (aiEstimate?.has_key ? 'bg-brand-ok text-black' : 'bg-brand-warn text-black')}>
@@ -227,7 +235,7 @@ export default function BulkTab({ accounts, onDone }) {
               AI change ({ids.length})
             </button>
             <span className="text-[10px] text-muted">
-              Estimate updates with selection. Telegram username changes are capped at 5 attempts per account.
+              Existing names are also replaced. Name follows phone country; username follows the name.
             </span>
           </div>
           {!aiEstimate?.has_key && (
@@ -308,7 +316,7 @@ export default function BulkTab({ accounts, onDone }) {
         <div className="nb-card p-4">
           <h3 className="display-title text-[20px] mb-3">Bulk profile photo</h3>
           <div className="flex items-center gap-2 mb-3 flex-wrap">
-            <input ref={photoRef} type="file" accept="image/*" multiple onChange={addPhotos}
+            <input ref={photoRef} type="file" accept=".zip,image/*" multiple onChange={addPhotos}
               className="text-xs file:nb-btn file:!py-1 file:!px-2" />
             <button className="nb-btn !py-1 !px-2 text-xs" disabled={photos.length === 0} onClick={clearPhotos}>
               Clear all
@@ -341,7 +349,7 @@ export default function BulkTab({ accounts, onDone }) {
             </div>
           )}
           <button className="nb-btn-pri" disabled={busy || photos.length === 0 || ids.length === 0} onClick={applyPhoto}>
-            Apply photos to {Math.min(photos.length, ids.length)} of {ids.length} accounts
+            Apply photos to {zipFiles.length > 0 ? `up to ${ids.length}` : `${Math.min(photos.length, ids.length)} of ${ids.length}`} accounts
           </button>
         </div>
       </div>

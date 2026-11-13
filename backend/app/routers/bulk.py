@@ -15,12 +15,14 @@ from telethon.errors import (
     UsernameOccupiedError,
 )
 import asyncio
+import io
 import json
 import logging
 import random
 import re
 import tempfile
 import os
+import zipfile
 
 from ..db import get_db, AsyncSessionLocal
 from ..models import Account
@@ -45,6 +47,40 @@ AI_COUNTRIES = [
 ]
 
 AI_USERNAME_RE = re.compile(r"^[a-z][a-z0-9_]{7,23}$")
+
+PHONE_COUNTRIES = {
+    "880": "Bangladesh", "91": "India", "92": "Pakistan", "94": "Sri Lanka",
+    "977": "Nepal", "95": "Myanmar", "971": "United Arab Emirates",
+    "966": "Saudi Arabia", "974": "Qatar", "965": "Kuwait", "973": "Bahrain",
+    "968": "Oman", "962": "Jordan", "961": "Lebanon", "963": "Syria",
+    "964": "Iraq", "98": "Iran", "90": "Turkey", "20": "Egypt",
+    "212": "Morocco", "213": "Algeria", "216": "Tunisia", "218": "Libya",
+    "234": "Nigeria", "254": "Kenya", "233": "Ghana", "27": "South Africa",
+    "55": "Brazil", "52": "Mexico", "54": "Argentina", "57": "Colombia",
+    "56": "Chile", "51": "Peru", "58": "Venezuela", "7": "Russia",
+    "380": "Ukraine", "48": "Poland", "49": "Germany", "33": "France",
+    "39": "Italy", "34": "Spain", "351": "Portugal", "31": "Netherlands",
+    "32": "Belgium", "41": "Switzerland", "43": "Austria", "46": "Sweden",
+    "47": "Norway", "45": "Denmark", "358": "Finland", "30": "Greece",
+    "81": "Japan", "82": "South Korea", "86": "China", "66": "Thailand",
+    "84": "Vietnam", "62": "Indonesia", "60": "Malaysia", "63": "Philippines",
+    "65": "Singapore", "1": "United States", "61": "Australia",
+    "64": "New Zealand", "998": "Uzbekistan", "994": "Azerbaijan",
+    "996": "Kyrgyzstan", "992": "Tajikistan", "993": "Turkmenistan",
+    "972": "Israel", "353": "Ireland", "44": "United Kingdom",
+}
+
+
+def _normalize_name(first: str, last: str) -> str:
+    return " ".join(f"{first or ''} {last or ''}".split()).strip().lower()
+
+
+def _country_for_phone(phone: str | None) -> str | None:
+    digits = re.sub(r"\D", "", phone or "")
+    for size in (3, 2, 1):
+        if len(digits) >= size and digits[:size] in PHONE_COUNTRIES:
+            return PHONE_COUNTRIES[digits[:size]]
+    return None
 
 
 def _ai_profile_cost(model: str | None) -> float:
@@ -86,6 +122,7 @@ async def _generate_ai_profile(api_key: str, model: str, account: Account,
         "the name, lowercase ASCII, 10-24 characters, one optional underscore, and may "
         "use 1, 3, 4 or 7 as letter substitutes or 1-3 digits. Never return the exact "
         "plain name as the username. Give six different high-availability candidates. "
+        "Every username must be visibly derived from this person's first and/or last name. "
         "Do not use @, spaces, dots, hyphens, generic words, or famous people."
     )
     user = (
@@ -128,28 +165,52 @@ async def _generate_ai_profile(api_key: str, model: str, account: Account,
             usernames.append(candidate)
     if not first or not usernames:
         raise ValueError("AI returned an incomplete profile")
+    name_bits = [
+        re.sub(r"[^a-z]", "", (part or "").lower())
+        for part in (first, last)
+    ]
+    name_bits = [part for part in name_bits if len(part) >= 3]
+    if name_bits:
+        related = [u for u in usernames if any(part in u for part in name_bits)]
+        if not related:
+            raise ValueError("AI usernames were not derived from the generated name")
+        usernames = related
     return first, last, usernames[:6]
 
 
 async def _apply_ai_profile(cli, account: Account, api_key: str, model: str,
-                            avoid_names: list[str], base_url: str | None = None,
+                            avoid_names: list[str], used_names: set[str],
+                            name_lock: asyncio.Lock, base_url: str | None = None,
                             provider: str | None = None):
     first = last = ""
     usernames: list[str] = []
     last_error = None
-    for _ in range(2):
-        country = random.choice(AI_COUNTRIES)
+    country = _country_for_phone(account.phone) or random.choice(AI_COUNTRIES)
+    reserved = False
+    for attempt in range(4):
         try:
             first, last, usernames = await _generate_ai_profile(
                 api_key, model, account, country, avoid_names,
                 base_url=base_url, provider=provider,
             )
-            break
         except Exception as e:
             last_error = e
             await asyncio.sleep(1)
-    if not first or not usernames:
-        raise RuntimeError(f"AI profile generation failed: {last_error}")
+            continue
+        full_name = _normalize_name(first, last)
+        reserved = False
+        async with name_lock:
+            if full_name and full_name not in used_names:
+                used_names.add(full_name)
+                reserved = True
+            if full_name and full_name not in avoid_names:
+                avoid_names.append(full_name)
+                del avoid_names[:-80]
+        if reserved:
+            break
+        await asyncio.sleep(0.2)
+    if not first or not usernames or not reserved:
+        raise RuntimeError(f"AI profile generation failed: {last_error or 'could not create a unique name'}")
 
     chosen = None
     for candidate in usernames[:5]:
@@ -226,14 +287,21 @@ async def bulk_ai_profiles(body: BulkAiProfileIn, db: AsyncSession = Depends(get
         (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
         for a in ordered
     ]
-    avoid_names: list[str] = []
+    name_rows = await db.execute(select(Account.first_name, Account.last_name))
+    used_names = {
+        _normalize_name(first, last)
+        for first, last in name_rows.all()
+        if _normalize_name(first, last)
+    }
+    avoid_names: list[str] = sorted(used_names)[-200:]
+    name_lock = asyncio.Lock()
 
     async def _do(cli, aid):
         account = by_id.get(aid)
         if not account:
             return "skipped", "account not found"
         detail = await _apply_ai_profile(
-            cli, account, api_key, model, avoid_names,
+            cli, account, api_key, model, avoid_names, used_names, name_lock,
             base_url=base_url, provider=provider,
         )
         return "ok", detail
@@ -346,46 +414,110 @@ async def bulk_photo(
     db: AsyncSession = Depends(get_db),
 ):
     """Streaming bulk profile photo (live progress). One photo per account in order.
-    - If len(files) >= len(accounts): first N files used, rest ignored.
-    - If len(files) <  len(accounts): only first len(files) accounts updated, others skipped.
+
+    A .zip upload is supported: image entries are sorted by filename and mapped
+    to accounts in that order. Extra images are ignored; accounts without a photo
+    are skipped. No non-image/zip-slip entries are extracted.
     """
     ids = [int(x) for x in account_ids.split(",") if x.strip()]
     res = await db.execute(select(Account).where(Account.id.in_(ids)))
     by_id = {a.id: a for a in res.scalars().all()}
     ordered = [by_id[i] for i in ids if i in by_id]
 
-    # write all uploads to disk first; map account-index -> temp path
+    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    max_images = 5000
+    max_each = 25 * 1024 * 1024
+    max_total = 1024 * 1024 * 1024
     tmp_paths: list[str] = []
-    for f in files:
-        data = await f.read()
-        suffix = os.path.splitext(f.filename or "photo.jpg")[1] or ".jpg"
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(data); tmp_paths.append(tmp.name)
+    total_bytes = 0
 
-    path_by_id: dict[int, str | None] = {}
-    for idx, acc in enumerate(ordered):
-        path_by_id[acc.id] = tmp_paths[idx] if idx < len(tmp_paths) else None
+    def _suffix(name: str) -> str:
+        return os.path.splitext(name or "")[1].lower() or ".jpg"
 
-    accounts = [
-        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
-        for a in ordered
-    ]
+    def _natural_key(name: str):
+        return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name or "")]
 
-    async def _do(cli, aid):
-        path = path_by_id.get(aid)
-        if not path:
-            return "skipped", "no photo for this account"
-        up = await cli.upload_file(path)
-        await cli(UploadProfilePhotoRequest(file=up))
-        return "ok", ""
+    try:
+        for upload in files:
+            filename = upload.filename or "photo.jpg"
+            if filename.lower().endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(upload.file) as archive:
+                        entries = sorted(
+                            (
+                                info for info in archive.infolist()
+                                if not info.is_dir()
+                                and not info.filename.startswith("__MACOSX/")
+                                and _suffix(info.filename) in image_exts
+                            ),
+                            key=lambda info: _natural_key(info.filename),
+                        )
+                        for info in entries:
+                            if len(tmp_paths) >= max_images or total_bytes >= max_total:
+                                break
+                            if info.file_size <= 0 or info.file_size > max_each:
+                                continue
+                            with archive.open(info) as src:
+                                data = src.read()
+                            total_bytes += len(data)
+                            if total_bytes > max_total:
+                                break
+                            with tempfile.NamedTemporaryFile(suffix=_suffix(info.filename), delete=False) as tmp:
+                                tmp.write(data)
+                                tmp_paths.append(tmp.name)
+                except zipfile.BadZipFile:
+                    raise HTTPException(400, f"{filename} is not a valid ZIP file")
+                continue
+            data = await upload.read()
+            if not data or len(data) > max_each or len(tmp_paths) >= max_images:
+                continue
+            total_bytes += len(data)
+            if total_bytes > max_total:
+                break
+            with tempfile.NamedTemporaryFile(suffix=_suffix(filename), delete=False) as tmp:
+                tmp.write(data)
+                tmp_paths.append(tmp.name)
 
-    async def _gen():
-        try:
-            async for line in bulk_stream(accounts, _do):
-                yield line
-        finally:
-            for p in tmp_paths:
-                try: os.unlink(p)
-                except Exception: pass
+        path_by_id: dict[int, str | None] = {}
+        for idx, acc in enumerate(ordered):
+            path_by_id[acc.id] = tmp_paths[idx] if idx < len(tmp_paths) else None
 
-    return StreamingResponse(_gen(), media_type="application/x-ndjson")
+        accounts = [
+            (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+            for a in ordered
+        ]
+
+        async def _do(cli, aid):
+            path = path_by_id.get(aid)
+            if not path:
+                return "skipped", "no photo for this account"
+            up = await cli.upload_file(path)
+            await cli(UploadProfilePhotoRequest(file=up))
+            return "ok", ""
+
+        async def _gen():
+            try:
+                async for line in bulk_stream(accounts, _do):
+                    yield line
+            finally:
+                for p in tmp_paths:
+                    try:
+                        os.unlink(p)
+                    except Exception:
+                        pass
+
+        return StreamingResponse(_gen(), media_type="application/x-ndjson")
+    except HTTPException:
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
+        raise
+    except Exception:
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
+        raise
