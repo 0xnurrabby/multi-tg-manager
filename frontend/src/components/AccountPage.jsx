@@ -95,7 +95,6 @@ export default function AccountPage({ account, accountNumber, accountTotal, onPr
             {account.unread_security > 0 && (
               <span className="nb-badge bg-brand-err">{account.unread_security} new</span>
             )}
-            <button className="nb-btn" onClick={() => onOpenTab?.('ai')}>AI chat</button>
             <button className="nb-btn" onClick={() => onOpenTab?.('groups')}>Groups</button>
             <button className="nb-btn" onClick={() => onOpenTab?.('messages')}>Messages</button>
           </div>
@@ -155,7 +154,6 @@ export default function AccountPage({ account, accountNumber, accountTotal, onPr
           <div className="nb-card p-5">
             <div className="micro-label">Quick actions</div>
             <div className="grid grid-cols-1 gap-2 mt-4">
-              <button className="nb-btn w-full justify-start" onClick={() => onOpenTab?.('ai')}>Open AI chat</button>
               <button className="nb-btn w-full justify-start" onClick={() => setSection('profile')}>Edit profile</button>
               <button className="nb-btn w-full justify-start" onClick={() => setSection('security')}>Security & sessions</button>
               <button className="nb-btn w-full justify-start" onClick={() => onOpenTab?.('groups')}>Groups</button>

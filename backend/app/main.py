@@ -11,10 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from .config import settings
 from .db import init_db
 from .tg_manager import manager
-from .ai_chat import ai_manager
 from .tunnel import tunnel_manager
 from .auth import router as auth_router, require_auth
-from .routers import accounts, profile, security, groups, messaging, settings as settings_router, bulk, ai as ai_router
+from .routers import accounts, profile, security, groups, messaging, settings as settings_router, bulk
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logging.getLogger("telethon").setLevel(logging.WARNING)
@@ -50,7 +49,6 @@ async def lifespan(app: FastAPI):
         if load_task and not load_task.done():
             load_task.cancel()
         await tunnel_manager.stop()
-        await ai_manager.shutdown()
         await manager.shutdown()
 
 
@@ -107,7 +105,6 @@ app.include_router(groups.router,          dependencies=PROTECTED_DEPS)
 app.include_router(messaging.router,       dependencies=PROTECTED_DEPS)
 app.include_router(settings_router.router, dependencies=PROTECTED_DEPS)
 app.include_router(bulk.router,            dependencies=PROTECTED_DEPS)
-app.include_router(ai_router.router,       dependencies=PROTECTED_DEPS)
 
 
 # Any /api/* path that didn't match a real route above returns a clean JSON 404

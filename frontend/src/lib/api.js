@@ -183,15 +183,6 @@ export const Endpoints = {
   emailSendCode: (id, email) => api.post(`/api/security/email/${id}/send_code`, { email }),
   emailVerify: (id, email, code) => api.post(`/api/security/email/${id}/verify`, { email, code }),
 
-  // AI chats with the target bot, one independent conversation per account
-  aiSettings: () => api.get('/api/ai/settings'),
-  saveAiSettings: (payload) => api.put('/api/ai/settings', payload),
-  clearAiKey: () => api.del('/api/ai/settings'),
-  aiStatus: (limit = 30, includeMessages = true, compact = false) => api.get('/api/ai/chat/status', { limit, include_messages: includeMessages, compact }),
-  aiDailyCounts: (accountIds) => api.post('/api/ai/chat/daily_counts', { account_ids: accountIds }),
-  startAiChats: (accountIds, fillDaily = false) => api.post('/api/ai/chat/start', { account_ids: accountIds, fill_daily: fillDaily }, { 'X-AI-Manual': '1' }),
-  sendAiCustom: (accountIds, message, onEvent) => streamNDJSON('/api/ai/chat/custom', { account_ids: accountIds, message }, onEvent),
-  stopAiChats: (accountIds) => api.post('/api/ai/chat/stop', { account_ids: accountIds }),
 
   joinGroup: (id, target) => api.post(`/api/groups/${id}/join`, { target }),
   bulkJoin: (ids, target, onEvent) => streamNDJSON('/api/groups/bulk_join', { account_ids: ids, target }, onEvent),

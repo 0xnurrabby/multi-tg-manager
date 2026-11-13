@@ -13,13 +13,11 @@ import Icon from './components/Icon.jsx'
 import DashboardTab from './tabs/DashboardTab.jsx'
 import StatsTab from './tabs/StatsTab.jsx'
 import SecurityTab from './tabs/SecurityTab.jsx'
-import AiChatTab from './tabs/AiChatTab.jsx'
 import OperationsTab from './tabs/OperationsTab.jsx'
 import SettingsTab from './tabs/SettingsTab.jsx'
 
 const TABS = [
   { id: 'dashboard',  label: 'Overview'   },
-  { id: 'ai',         label: 'AI Chat'    },
   { id: 'security',   label: 'Security'   },
   { id: 'operations', label: 'Operations' },
   { id: 'stats',      label: 'Insights'   },
@@ -135,8 +133,8 @@ export default function App() {
     // On phones the directory is a drawer; selecting an account should reveal
     // the full page instead of leaving the list over it.
     if (typeof window !== 'undefined' && window.innerWidth < 1024) setSidebarOpen(false)
-    // Dashboard clicks open the full account page. Inside a tool tab (AI Chat,
-    // Groups, Messages, etc.) selection should stay in that tool.
+    // Dashboard clicks open the full account page. Inside a tool tab, selection
+    // should stay in that tool.
     if (acc?.phone && (routePhone || tab === 'dashboard')) {
       setRoutePhone(acc.phone)
       window.history.pushState({}, '', '/' + acc.phone)
@@ -310,9 +308,8 @@ export default function App() {
               ) : (
                 <>
                   {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={openAccount} onOpenAlert={(m) => { setSelectedId(m.account_id); setFocusAlert({ accountId: m.account_id, messageId: m.id, ts: Date.now() }); closeAccountRoute(); setTab('security') }} onChange={() => { refreshStats(); refreshAccounts() }} />}
-                  {tab === 'stats'      && <StatsTab accounts={accounts} onOpenChat={(id) => { setSelectedId(id); setSelectTick((n) => n + 1); closeAccountRoute(); setTab('ai') }} />}
+                  {tab === 'stats'      && <StatsTab accounts={accounts} />}
                   {tab === 'security'   && <SecurityTab accounts={accounts} focusAlert={focusAlert} focusAccountId={selectedId} focusTick={selectTick} onChange={refreshStats} />}
-                  {tab === 'ai'         && <AiChatTab accounts={accounts} focusAccountId={selectedId} focusTick={selectTick} />}
                   {tab === 'operations' && <OperationsTab accounts={accounts} selected={selected} onDone={refreshAccounts} active={operationsTab} onChange={setOperationsTab} />}
                   {tab === 'settings'   && <SettingsTab />}
                 </>
