@@ -12,26 +12,18 @@ import AccountPage from './components/AccountPage.jsx'
 import Icon from './components/Icon.jsx'
 import DashboardTab from './tabs/DashboardTab.jsx'
 import StatsTab from './tabs/StatsTab.jsx'
-import ProfileTab from './tabs/ProfileTab.jsx'
 import SecurityTab from './tabs/SecurityTab.jsx'
-import GroupsTab from './tabs/GroupsTab.jsx'
-import MessagingTab from './tabs/MessagingTab.jsx'
 import AiChatTab from './tabs/AiChatTab.jsx'
-import TargetCheckTab from './tabs/TargetCheckTab.jsx'
-import BulkTab from './tabs/BulkTab.jsx'
+import OperationsTab from './tabs/OperationsTab.jsx'
 import SettingsTab from './tabs/SettingsTab.jsx'
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'stats',     label: 'Stats'     },
-  { id: 'profile',   label: 'Profile'   },
-  { id: 'security',  label: 'Security'  },
-  { id: 'groups',    label: 'Groups'    },
-  { id: 'messages',  label: 'Messages'  },
-  { id: 'ai',        label: 'AI Chat'   },
-  { id: 'checker',   label: 'Checker'   },
-  { id: 'bulk',      label: 'Bulk'      },
-  { id: 'settings',  label: 'Settings'  },
+  { id: 'dashboard',  label: 'Overview'   },
+  { id: 'ai',         label: 'AI Chat'    },
+  { id: 'security',   label: 'Security'   },
+  { id: 'operations', label: 'Operations' },
+  { id: 'stats',      label: 'Insights'   },
+  { id: 'settings',   label: 'Settings'   },
 ]
 
 // Account URLs look like /+8801889426746 (or /8801889426746).
@@ -55,6 +47,7 @@ export default function App() {
   const [stats, setStats] = useState({ total: 0, connected: 0, banned: 0, with_2fa: 0, with_email: 0, unread_security: 0 })
   const [selectedId, setSelectedId] = useState(null)
   const [tab, setTab] = useState('dashboard')
+  const [operationsTab, setOperationsTab] = useState('groups')
   const [sidebarOpen, setSidebarOpen] = useState(() => (typeof window === 'undefined' ? true : window.innerWidth > 1024))
   const [addOpen, setAddOpen] = useState(false)
   // { accountId, messageId, ts } — lets an alert click jump straight to the
@@ -254,7 +247,11 @@ export default function App() {
           <nav className="shrink-0 border-b border-[color:var(--hairline)] bg-paper/70">
             <div className="mx-auto w-full max-w-[1120px] px-5 sm:px-6 overflow-x-auto">
               <div className="flex gap-1 py-2 min-w-max">
-                {routePhone && <span className="nb-tab nb-tab-active">Account</span>}
+                {routePhone && (
+                  <button className="nb-tab nb-tab-active" onClick={closeAccountRoute}>
+                    ? Accounts
+                  </button>
+                )}
                 {TABS.map((t) => (
                   <button
                     key={t.id}
@@ -287,7 +284,14 @@ export default function App() {
                       openAccount(activeOrder[i].id)
                     }}
                     onRefresh={() => { refreshAccounts(); refreshStats() }}
-                    onOpenTab={(id) => { closeAccountRoute(); setFocusAlert(null); setTab(id) }}
+                    onOpenTab={(id) => {
+                      closeAccountRoute(); setFocusAlert(null)
+                      if (id === 'groups' || id === 'messages') {
+                        setOperationsTab(id); setTab('operations')
+                      } else {
+                        setTab(id)
+                      }
+                    }}
                   />
                 ) : accounts.length === 0 ? (
                   <div className="empty-state">
@@ -306,15 +310,11 @@ export default function App() {
               ) : (
                 <>
                   {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={openAccount} onOpenAlert={(m) => { setSelectedId(m.account_id); setFocusAlert({ accountId: m.account_id, messageId: m.id, ts: Date.now() }); closeAccountRoute(); setTab('security') }} onChange={() => { refreshStats(); refreshAccounts() }} />}
-                  {tab === 'stats'     && <StatsTab accounts={accounts} onOpenChat={(id) => { setSelectedId(id); setSelectTick((n) => n + 1); closeAccountRoute(); setTab('ai') }} />}
-                  {tab === 'profile'   && <ProfileTab account={selected} onRefresh={refreshAccounts} />}
-                  {tab === 'security'  && <SecurityTab accounts={accounts} focusAlert={focusAlert} focusAccountId={selectedId} focusTick={selectTick} onChange={refreshStats} />}
-                  {tab === 'groups'    && <GroupsTab accounts={accounts} selected={selected} />}
-                  {tab === 'messages'  && <MessagingTab accounts={accounts} selected={selected} />}
-                  {tab === 'ai'        && <AiChatTab accounts={accounts} focusAccountId={selectedId} focusTick={selectTick} />}
-                  {tab === 'checker'   && <TargetCheckTab />}
-                  {tab === 'bulk'      && <BulkTab accounts={accounts} onDone={refreshAccounts} />}
-                  {tab === 'settings'  && <SettingsTab />}
+                  {tab === 'stats'      && <StatsTab accounts={accounts} onOpenChat={(id) => { setSelectedId(id); setSelectTick((n) => n + 1); closeAccountRoute(); setTab('ai') }} />}
+                  {tab === 'security'   && <SecurityTab accounts={accounts} focusAlert={focusAlert} focusAccountId={selectedId} focusTick={selectTick} onChange={refreshStats} />}
+                  {tab === 'ai'         && <AiChatTab accounts={accounts} focusAccountId={selectedId} focusTick={selectTick} />}
+                  {tab === 'operations' && <OperationsTab accounts={accounts} selected={selected} onDone={refreshAccounts} active={operationsTab} onChange={setOperationsTab} />}
+                  {tab === 'settings'   && <SettingsTab />}
                 </>
               )}
             </div>

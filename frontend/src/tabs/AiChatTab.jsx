@@ -145,6 +145,7 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   const [accountLimit, setAccountLimit] = useState(120)
   const [budgetDismissed, setBudgetDismissed] = useState(false)
   const [showRunControls, setShowRunControls] = useState(false)
+  const [showSetup, setShowSetup] = useState(false)
   const [keyInput, setKeyInput] = useState('')
   const [editKey, setEditKey] = useState(false)
   const [showKey, setShowKey] = useState(false)
@@ -570,8 +571,15 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
   return (
     <div className="space-y-5">
       <div className="nb-card p-5">
-        <div className="micro-label">Companion</div>
-        <h1 className="display-title text-[30px] mt-2">AI chat</h1>
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="micro-label">Companion</div>
+            <h1 className="display-title text-[30px] mt-2">AI chat</h1>
+          </div>
+          <button className="nb-btn" onClick={() => setShowSetup((v) => !v)}>
+            {showSetup ? 'Hide setup' : (settings?.has_key ? 'Gateway setup' : 'Add gateway key')}
+          </button>
+        </div>
         <p className="text-sm text-muted mt-2 max-w-[68ch] leading-6">
           Each selected account has a natural, human conversation with the target bot.
           Every account gets its own personality and its own chat. The daily goal is 100 messages per account, reset at
@@ -603,6 +611,8 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
         </div>
       )}
 
+      {showSetup && (
+        <>
       {/* Gateway setup */}
       <div className="nb-card p-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -724,6 +734,9 @@ export default function AiChatTab({ accounts, focusAccountId, focusTick }) {
           </span>
         </div>
       </div>
+
+        </>
+      )}
 
       {/* Accounts and controls */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">

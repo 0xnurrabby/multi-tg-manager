@@ -891,6 +891,7 @@ function LoginRequestsPanel({ onChange }) {
 
 export default function SecurityTab({ accounts, focusAlert, focusAccountId, focusTick, onChange }) {
   const selected = accounts.find((a) => a.id === focusAccountId) || null
+  const [showTools, setShowTools] = useState(false)
 
   return (
     <div>
@@ -903,13 +904,20 @@ export default function SecurityTab({ accounts, focusAlert, focusAccountId, focu
           from the sidebar to see its messages and active sessions. Login approvals
           include their Confirm and Decline buttons.
         </div>
+        <button className="nb-btn mt-3" onClick={() => setShowTools((v) => !v)}>
+          {showTools ? 'Hide bulk security tools' : 'Show bulk security tools'}
+        </button>
       </div>
 
       <LoginRequestsPanel onChange={onChange} />
 
-      <BulkTerminateSessionsPanel accounts={accounts} onChange={onChange} />
-      <Bulk2faPanel accounts={accounts} onChange={onChange} />
-      <EmailLoginPanel accounts={accounts} selected={selected} onChange={onChange} />
+      {showTools && (
+        <>
+          <BulkTerminateSessionsPanel accounts={accounts} onChange={onChange} />
+          <Bulk2faPanel accounts={accounts} onChange={onChange} />
+          <EmailLoginPanel accounts={accounts} selected={selected} onChange={onChange} />
+        </>
+      )}
 
       {!selected && (
         <div className="empty-state">
