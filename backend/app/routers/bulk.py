@@ -424,7 +424,7 @@ async def bulk_photo(
     by_id = {a.id: a for a in res.scalars().all()}
     ordered = [by_id[i] for i in ids if i in by_id]
 
-    image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    image_exts = {".jpg", ".jpeg", ".jfif", ".png", ".webp"}
     max_images = 5000
     max_each = 25 * 1024 * 1024
     max_total = 1024 * 1024 * 1024
@@ -477,6 +477,10 @@ async def bulk_photo(
             with tempfile.NamedTemporaryFile(suffix=_suffix(filename), delete=False) as tmp:
                 tmp.write(data)
                 tmp_paths.append(tmp.name)
+
+        log.info("bulk photo: extracted %d image(s) from %d upload(s) for %d account(s)", len(tmp_paths), len(files), len(ordered))
+        if not tmp_paths:
+            raise HTTPException(400, "No supported images found in the upload. Use JPG, JPEG, PNG or WEBP (ZIP images are sorted by filename).")
 
         path_by_id: dict[int, str | None] = {}
         for idx, acc in enumerate(ordered):
