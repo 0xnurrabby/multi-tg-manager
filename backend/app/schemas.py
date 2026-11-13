@@ -132,6 +132,10 @@ class PressServiceButtonIn(BaseModel):
     index: int
 
 
+class AutoDeclineIn(BaseModel):
+    enabled: bool
+
+
 class TgSessionOut(BaseModel):
     hash: int
     device: str

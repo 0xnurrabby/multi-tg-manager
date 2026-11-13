@@ -28,7 +28,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import AsyncSessionLocal
-from .models import Account, SecurityMessage, GoneAccount
+from .models import Account, SecurityMessage, GoneAccount, AppSetting
 from . import secrets_store
 
 log = logging.getLogger("tg_manager")
@@ -846,6 +846,26 @@ class TgClientManager:
                     db.add(sm)
                     await db.commit()
                     await db.refresh(sm)
+                    pref = await db.get(AppSetting, "auto_decline_login")
+                    if (
+                        m_type == "login_request"
+                        and pref is not None and pref.value == "true"
+                    ):
+                        decline = next((
+                            b for b in buttons
+                            if b.get("type") == "callback"
+                            and re.search(r"decline|deny|reject|cancel", b.get("text", ""), re.I)
+                        ), None)
+                        if decline:
+                            try:
+                                await self.press_service_button(
+                                    account_id, msg_id, decline["index"], decline.get("data"),
+                                )
+                                sm.action_status = "Auto-declined"
+                                sm.is_read = True
+                                await db.commit()
+                            except Exception as e:
+                                log.warning("auto-decline failed for %s: %s", account_id, e)
                 # notify pub/sub
                 for cb in list(self._new_msg_callbacks):
                     try:
@@ -856,6 +876,7 @@ class TgClientManager:
                             "message_text": text,
                             "received_at": sm.received_at.isoformat(),
                             "buttons": buttons,
+                            "action_status": sm.action_status or "",
                         })
                     except Exception:
                         pass

@@ -161,6 +161,9 @@ export const Endpoints = {
 
   securityMessages: (accountId, onlyUnread) =>
     api.get('/api/security/messages', { account_id: accountId, only_unread: onlyUnread }),
+  securityRequests: () => api.get('/api/security/login_requests'),
+  getAutoDecline: () => api.get('/api/security/auto_decline'),
+  setAutoDecline: (enabled) => api.put('/api/security/auto_decline', { enabled }),
   markRead: (id) => api.post(`/api/security/messages/${id}/read`),
   pressSecurityButton: (id, index) => api.post(`/api/security/messages/${id}/press`, { index }),
   markAllRead: (accountId) => api.post('/api/security/messages/mark_all_read' + (accountId ? `?account_id=${accountId}` : '')),

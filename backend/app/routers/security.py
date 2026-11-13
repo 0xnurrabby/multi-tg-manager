@@ -9,19 +9,77 @@ from telethon.tl.functions.account import (
 )
 from telethon.tl.types import EmailVerifyPurposeLoginChange, EmailVerificationCode
 from telethon.errors import FloodWaitError, PasswordHashInvalidError
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..db import get_db, AsyncSessionLocal
-from ..models import SecurityMessage, Account
+from ..models import SecurityMessage, Account, AppSetting
 from ..schemas import (
     SecurityMessageOut, TgSessionOut, Bulk2faIn, PressServiceButtonIn,
-    EmailLoginSendIn, EmailLoginVerifyIn,
+    EmailLoginSendIn, EmailLoginVerifyIn, AutoDeclineIn,
 )
 from ..tg_manager import manager
 from .. import secrets_store
 from ..utils import bulk_stream, friendly_error
 
 router = APIRouter(prefix="/api/security", tags=["security"])
+
+
+AUTO_DECLINE_KEY = "auto_decline_login"
+REQUEST_TYPES = ("login_request", "new_login", "login_code", "account_deletion", "2fa_change")
+
+
+async def _auto_decline_enabled(db: AsyncSession) -> bool:
+    row = await db.get(AppSetting, AUTO_DECLINE_KEY)
+    return bool(row and row.value == "true")
+
+
+@router.get("/login_requests")
+async def login_requests(limit: int = 100, db: AsyncSession = Depends(get_db)):
+    limit = max(1, min(int(limit or 100), 200))
+    since = datetime.utcnow() - timedelta(days=7)
+    res = await db.execute(
+        select(SecurityMessage, Account)
+        .join(Account, Account.id == SecurityMessage.account_id)
+        .where(
+            SecurityMessage.type.in_(REQUEST_TYPES),
+            SecurityMessage.received_at >= since,
+        )
+        .order_by(desc(SecurityMessage.received_at))
+        .limit(limit)
+    )
+    out = []
+    for msg, acc in res.all():
+        out.append({
+            "id": msg.id,
+            "account_id": msg.account_id,
+            "account_name": (f"{acc.first_name or ''} {acc.last_name or ''}".strip() or acc.phone),
+            "phone": acc.phone,
+            "username": acc.username or "",
+            "type": msg.type,
+            "message_text": msg.message_text,
+            "received_at": msg.received_at.isoformat() if msg.received_at else None,
+            "is_read": bool(msg.is_read),
+            "buttons": msg.buttons,
+            "action_status": msg.action_status or "",
+        })
+    return out
+
+
+@router.get("/auto_decline")
+async def get_auto_decline(db: AsyncSession = Depends(get_db)):
+    return {"enabled": await _auto_decline_enabled(db)}
+
+
+@router.put("/auto_decline")
+async def set_auto_decline(body: AutoDeclineIn, db: AsyncSession = Depends(get_db)):
+    row = await db.get(AppSetting, AUTO_DECLINE_KEY)
+    value = "true" if body.enabled else "false"
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=AUTO_DECLINE_KEY, value=value))
+    await db.commit()
+    return {"enabled": bool(body.enabled)}
 
 
 @router.get("/messages", response_model=list[SecurityMessageOut])

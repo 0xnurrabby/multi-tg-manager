@@ -766,6 +766,129 @@ function BulkTerminateSessionsPanel({ accounts, onChange }) {
   )
 }
 
+function LoginRequestsPanel({ onChange }) {
+  const toast = useToast()
+  const [items, setItems] = useState([])
+  const [auto, setAuto] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const rows = await Endpoints.securityRequests()
+      setItems(rows || [])
+    } catch {
+      // The panel stays quiet; the Security tab's main content still works.
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    load()
+    Endpoints.getAutoDecline()
+      .then((r) => { if (alive) setAuto(!!r?.enabled) })
+      .catch(() => {})
+    const id = setInterval(() => { if (!document.hidden) load() }, 6000)
+    return () => { alive = false; clearInterval(id) }
+  }, [load])
+
+  async function toggleAuto(e) {
+    const enabled = e.target.checked
+    setAuto(enabled)
+    try {
+      await Endpoints.setAutoDecline(enabled)
+      toast.success(enabled ? 'Auto-decline is ON' : 'Auto-decline is OFF')
+    } catch (err) {
+      setAuto(!enabled)
+      toast.error(err.message)
+    }
+  }
+
+  async function press(req, btn) {
+    setBusy(true)
+    try {
+      const r = await Endpoints.pressSecurityButton(req.id, btn.index)
+      toast.success(r?.answer && r.answer !== 'ok' ? r.answer : `${btn.text || 'Pressed'}: ${req.account_name}`)
+      await load()
+      onChange?.()
+    } catch (err) {
+      toast.error(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="nb-card p-5 mb-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="micro-label">Security watch</div>
+          <div className="display-title text-[22px] mt-1">Login &amp; reset requests</div>
+          <div className="text-[12px] text-muted mt-1.5 max-w-[64ch] leading-5">
+            Telegram 777000 login approvals, login codes and reset/security changes for all accounts.
+            Approve or decline from here.
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-[11px] text-muted cursor-pointer select-none">
+          <input type="checkbox" checked={auto} onChange={toggleAuto} />
+          Auto-decline login approvals
+        </label>
+      </div>
+
+      {auto && (
+        <div className="nb-note nb-note-warn px-3 py-2 text-[11px] mt-3">
+          Auto-decline is ON. New Telegram login approvals will be declined automatically.
+          Turn it off before you log in on a new device yourself.
+        </div>
+      )}
+
+      {loading && items.length === 0 && <div className="text-sm text-muted mt-3">Loading...</div>}
+      {!loading && items.length === 0 && (
+        <div className="text-sm text-muted mt-3">No login or reset requests in the last 7 days.</div>
+      )}
+
+      {items.length > 0 && (
+        <div className="space-y-2 mt-3 max-h-[360px] overflow-auto pr-1">
+          {items.map((r) => (
+            <div key={r.id} className="nb-card-sm p-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`nb-badge ${TYPE_COLORS[r.type] || 'bg-white'}`}>{r.type}</span>
+                <span className="font-semibold text-[12px]">{r.account_name}</span>
+                <span className="text-[10px] text-muted font-mono truncate">{r.phone}{r.username ? ` ? @${r.username}` : ''}</span>
+                <span className="text-[10px] text-muted font-mono ml-auto">{fmtTime(r.received_at)}</span>
+              </div>
+              <div className="text-[11px] font-mono text-muted mt-1.5 whitespace-pre-wrap line-clamp-3">
+                {(r.message_text || '').slice(0, 320)}
+              </div>
+              <div className="flex items-center gap-2 flex-wrap mt-2">
+                {(r.buttons || []).filter((b) => b.type === 'callback').map((b) => (
+                  <button
+                    key={b.index}
+                    className={buttonClass(b.text) + ' !py-1 !px-3 text-xs'}
+                    disabled={busy || !!r.action_status}
+                    onClick={() => press(r, b)}
+                  >
+                    {b.text || `Button ${b.index + 1}`}
+                  </button>
+                ))}
+                {r.action_status && (
+                  <span className="text-[10px] text-muted">Action: {r.action_status}</span>
+                )}
+                {!(r.buttons || []).some((b) => b.type === 'callback') && !r.action_status && (
+                  <span className="text-[10px] text-muted">No action button</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SecurityTab({ accounts, focusAlert, focusAccountId, focusTick, onChange }) {
   const selected = accounts.find((a) => a.id === focusAccountId) || null
 
@@ -781,6 +904,8 @@ export default function SecurityTab({ accounts, focusAlert, focusAccountId, focu
           include their Confirm and Decline buttons.
         </div>
       </div>
+
+      <LoginRequestsPanel onChange={onChange} />
 
       <BulkTerminateSessionsPanel accounts={accounts} onChange={onChange} />
       <Bulk2faPanel accounts={accounts} onChange={onChange} />
