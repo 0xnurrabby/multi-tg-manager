@@ -22,6 +22,7 @@ import random
 import re
 import tempfile
 import os
+import shutil
 import zipfile
 
 from ..db import get_db, AsyncSessionLocal
@@ -438,33 +439,58 @@ async def bulk_photo(
         return [int(part) if part.isdigit() else part.lower() for part in re.split(r"(\d+)", name or "")]
 
     try:
+        def _extract_images(archive: zipfile.ZipFile, depth: int = 0):
+            nonlocal total_bytes
+            entries = sorted(
+                (
+                    info for info in archive.infolist()
+                    if not info.is_dir()
+                    and not info.filename.startswith("__MACOSX/")
+                ),
+                key=lambda info: _natural_key(info.filename),
+            )
+            for info in entries:
+                if len(tmp_paths) >= max_images or total_bytes >= max_total:
+                    return
+                suffix = _suffix(info.filename)
+                if suffix == ".zip":
+                    if depth >= 2 or info.file_size <= 0 or info.file_size > max_total:
+                        continue
+                    nested_path = ""
+                    try:
+                        with archive.open(info) as src, tempfile.NamedTemporaryFile(
+                            prefix="mtm_nested_", suffix=".zip", delete=False
+                        ) as tmp:
+                            shutil.copyfileobj(src, tmp)
+                            nested_path = tmp.name
+                        with zipfile.ZipFile(nested_path) as nested:
+                            _extract_images(nested, depth + 1)
+                    except zipfile.BadZipFile:
+                        continue
+                    finally:
+                        if nested_path:
+                            try:
+                                os.unlink(nested_path)
+                            except Exception:
+                                pass
+                    continue
+                if suffix not in image_exts or info.file_size <= 0 or info.file_size > max_each:
+                    continue
+                with archive.open(info) as src:
+                    data = src.read()
+                total_bytes += len(data)
+                if total_bytes > max_total:
+                    return
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                    tmp.write(data)
+                    tmp_paths.append(tmp.name)
+
         for upload in files:
             filename = upload.filename or "photo.jpg"
             if filename.lower().endswith(".zip"):
                 try:
                     with zipfile.ZipFile(upload.file) as archive:
-                        entries = sorted(
-                            (
-                                info for info in archive.infolist()
-                                if not info.is_dir()
-                                and not info.filename.startswith("__MACOSX/")
-                                and _suffix(info.filename) in image_exts
-                            ),
-                            key=lambda info: _natural_key(info.filename),
-                        )
-                        for info in entries:
-                            if len(tmp_paths) >= max_images or total_bytes >= max_total:
-                                break
-                            if info.file_size <= 0 or info.file_size > max_each:
-                                continue
-                            with archive.open(info) as src:
-                                data = src.read()
-                            total_bytes += len(data)
-                            if total_bytes > max_total:
-                                break
-                            with tempfile.NamedTemporaryFile(suffix=_suffix(info.filename), delete=False) as tmp:
-                                tmp.write(data)
-                                tmp_paths.append(tmp.name)
+                        _extract_images(archive, 0)
                 except zipfile.BadZipFile:
                     raise HTTPException(400, f"{filename} is not a valid ZIP file")
                 continue
