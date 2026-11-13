@@ -1,13 +1,24 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+import asyncio
 import json
+import os
+import re
+import shutil
+import sqlite3
+import tempfile
+import zipfile
 from datetime import datetime
+from pathlib import Path
 
 from ..db import get_db
 from ..models import AppSetting, Account
 from ..schemas import SettingsIn, SettingsOut
 from ..config import settings as env_settings
+from ..tg_manager import manager
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -71,6 +82,85 @@ async def update_settings(body: SettingsIn, db: AsyncSession = Depends(get_db)):
     env_settings.RATE_MAX = body.rate_max
     env_settings.CONCURRENCY = conc
     return await get_settings(db)
+
+
+def _safe_remove(path: str):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _session_snapshot(source: Path, target: Path):
+    try:
+        with sqlite3.connect(f"{source.as_uri()}?mode=ro", uri=True) as src:
+            with sqlite3.connect(target) as dst:
+                src.backup(dst)
+    except Exception:
+        shutil.copy2(source, target)
+
+
+def _build_session_zip(accounts: list[Account]) -> tuple[str, int]:
+    tmp = tempfile.NamedTemporaryFile(prefix="telegram-sessions-", suffix=".zip", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    manifest = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="telegram-session-snap-") as work, \
+                zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            for acc in accounts:
+                base = manager._session_path_for_account(acc)
+                source = Path(base + ".session")
+                if not source.exists():
+                    continue
+                safe = re.sub(r"[^0-9A-Za-z_.-]", "_", acc.phone or str(acc.id))
+                arcname = f"sessions/{acc.id}_{safe}.session"
+                snap = Path(work) / f"{acc.id}.session"
+                try:
+                    _session_snapshot(source, snap)
+                    archive.write(snap, arcname)
+                except Exception:
+                    continue
+                manifest.append({
+                    "account_id": acc.id,
+                    "phone": acc.phone,
+                    "name": (f"{acc.first_name or ''} {acc.last_name or ''}".strip() or acc.phone),
+                    "username": acc.username or "",
+                    "status": acc.status,
+                    "has_2fa": bool(acc.has_2fa),
+                    "session_file": arcname,
+                })
+            if not manifest:
+                raise RuntimeError("No session files found")
+            archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
+            archive.writestr("README.txt", (
+                "Telegram MTProto session export.\n\n"
+                "These files grant full access to the Telegram accounts. Keep this archive private.\n"
+                "Import only into a trusted Telethon/MTProto-compatible client using the same API credentials as this manager.\n"
+                "The official Telegram app cannot import .session files.\n"
+                "This export is a read-only snapshot: no account was logged out or deleted.\n"
+            ))
+        return tmp_path, len(manifest)
+    except Exception:
+        _safe_remove(tmp_path)
+        raise
+
+
+@router.get("/sessions/export")
+async def export_sessions(db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(Account).order_by(Account.id))
+    accounts = list(res.scalars().all())
+    try:
+        path, count = await asyncio.to_thread(_build_session_zip, accounts)
+    except Exception as e:
+        raise HTTPException(400, str(e) or "Could not build session export")
+    filename = f"telegram-sessions-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+    return FileResponse(
+        path,
+        media_type="application/zip",
+        filename=filename,
+        background=BackgroundTask(_safe_remove, path),
+    )
 
 
 @router.get("/export")

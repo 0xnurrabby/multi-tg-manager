@@ -6,6 +6,7 @@ export default function SettingsTab() {
   const toast = useToast()
   const [s, setS] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [exportingSessions, setExportingSessions] = useState(false)
 
   useEffect(() => {
     Endpoints.getSettings().then(setS).catch((e) => toast.error(e.message))
@@ -32,6 +33,21 @@ export default function SettingsTab() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) { toast.error(e.message) }
+  }
+
+  async function exportSessions() {
+    setExportingSessions(true)
+    try {
+      const blob = await Endpoints.exportSessions()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `telegram-sessions-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Session ZIP downloaded')
+    } catch (e) { toast.error(e.message) }
+    finally { setExportingSessions(false) }
   }
 
   return (
@@ -77,6 +93,24 @@ export default function SettingsTab() {
             onChange={(e) => setS({ ...s, sessions_dir: e.target.value })} />
           <p className="text-xs text-muted mt-2">Change takes effect on the next backend restart.</p>
         </label>
+        <div
+          className="mt-4 rounded-2xl border border-[color:var(--hairline)] p-3"
+          style={{ background: 'linear-gradient(120deg, rgb(var(--accent-peach) / 0.5), rgb(var(--accent-rose) / 0.28))' }}
+        >
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <div className="micro-label">Session export</div>
+              <div className="text-sm font-semibold mt-0.5">Download all sessions (.zip)</div>
+              <div className="text-[11px] text-muted mt-1 max-w-[52ch] leading-5">
+                Full account-access snapshot. Keep the ZIP private. This does not log out or delete anything.
+                Import into a Telethon/MTProto-compatible client, not the official Telegram app.
+              </div>
+            </div>
+            <button className="nb-btn-pri shrink-0" disabled={exportingSessions} onClick={exportSessions}>
+              {exportingSessions ? 'Building ZIP...' : 'Export sessions'}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="nb-card p-5">

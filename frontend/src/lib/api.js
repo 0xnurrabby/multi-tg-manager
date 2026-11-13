@@ -231,6 +231,15 @@ export const Endpoints = {
   getSettings: () => api.get('/api/settings'),
   putSettings: (s) => api.put('/api/settings', s),
   exportJson: () => api.get('/api/settings/export'),
+  exportSessions: async () => {
+    const r = await fetch('/api/settings/sessions/export', { credentials: 'include' })
+    if (!r.ok) {
+      let detail = ''
+      try { detail = (await r.json())?.detail || '' } catch { /* ignore */ }
+      throw new Error(detail || `Could not export sessions (${r.status})`)
+    }
+    return r.blob()
+  },
 
   // app auth
   me:     () => api.get('/api/auth-app/me'),
