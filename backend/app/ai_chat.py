@@ -260,9 +260,15 @@ class GatewayError(Exception):
 
 
 def _gateway_request(method: str, path: str, api_key: str, payload: dict | None = None,
-                     timeout: float = 45.0) -> dict:
-    url = GATEWAY_BASE + path
-    if payload is not None and payload.get("model") and "providerOptions" not in payload:
+                     timeout: float = 45.0, base_url: str | None = None,
+                     provider: str | None = None) -> dict:
+    url = (base_url or GATEWAY_BASE) + path
+    if (
+        (provider or "vercel") == "vercel"
+        and payload is not None
+        and payload.get("model")
+        and "providerOptions" not in payload
+    ):
         payload = {**payload, "providerOptions": GATEWAY_PROVIDER_OPTIONS}
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {

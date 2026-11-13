@@ -221,6 +221,9 @@ export const Endpoints = {
 
   getSettings: () => api.get('/api/settings'),
   putSettings: (s) => api.put('/api/settings', s),
+  aiKey: () => api.get('/api/settings/ai_key'),
+  saveAiKey: (payload) => api.put('/api/settings/ai_key', payload),
+  clearAiKey: () => api.del('/api/settings/ai_key'),
   exportJson: () => api.get('/api/settings/export'),
   exportSessions: async () => {
     const r = await fetch('/api/settings/sessions/export', { credentials: 'include' })

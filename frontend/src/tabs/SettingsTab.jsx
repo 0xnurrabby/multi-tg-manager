@@ -9,9 +9,22 @@ export default function SettingsTab() {
   const [busy, setBusy] = useState(false)
   const [exportingSessions, setExportingSessions] = useState(false)
   const [timeZone, setTimeZone] = useState(getTimeZoneChoice())
+  const [aiKey, setAiKey] = useState(null)
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [aiModel, setAiModel] = useState('')
+  const [showApiKey, setShowApiKey] = useState(false)
+  const [editingKey, setEditingKey] = useState(false)
+  const [savingKey, setSavingKey] = useState(false)
 
   useEffect(() => {
     Endpoints.getSettings().then(setS).catch((e) => toast.error(e.message))
+    Endpoints.aiKey()
+      .then((k) => {
+        setAiKey(k)
+        setAiModel(k?.model || '')
+        setEditingKey(!k?.has_key)
+      })
+      .catch((e) => toast.error(e.message))
   }, [])
 
   if (!s) return <div className="opacity-60">Loading settings…</div>
@@ -37,6 +50,36 @@ export default function SettingsTab() {
     } catch (e) { toast.error(e.message) }
   }
 
+  async function saveApiKey() {
+    const key = apiKeyInput.trim()
+    if (!key) {
+      toast.error('Paste an API key first')
+      return
+    }
+    setSavingKey(true)
+    try {
+      const r = await Endpoints.saveAiKey({ api_key: key, model: aiModel.trim() })
+      setAiKey(r)
+      setAiModel(r?.model || '')
+      setApiKeyInput('')
+      setEditingKey(false)
+      toast.success(`Saved ${r?.provider_label || 'AI provider'} key`)
+      if (r?.warning) toast.info(r.warning)
+    } catch (e) { toast.error(e.message) }
+    finally { setSavingKey(false) }
+  }
+
+  async function removeApiKey() {
+    if (!confirm('Remove the saved AI API key?')) return
+    try {
+      const r = await Endpoints.clearAiKey()
+      setAiKey(r)
+      setEditingKey(true)
+      setApiKeyInput('')
+      toast.success('AI API key removed')
+    } catch (e) { toast.error(e.message) }
+  }
+
   async function exportSessions() {
     setExportingSessions(true)
     try {
@@ -54,6 +97,68 @@ export default function SettingsTab() {
 
   return (
     <div className="max-w-2xl space-y-4">
+      <div className="nb-card p-5">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="micro-label">AI provider</div>
+            <h3 className="display-title text-[20px] mt-1">API key</h3>
+          </div>
+          {aiKey?.has_key && (
+            <span className="nb-badge bg-brand-ok">{aiKey.provider_label || 'AI provider'}</span>
+          )}
+        </div>
+        <p className="text-sm text-muted mt-2 mb-4">
+          Paste a Vercel AI Gateway or OpenRouter key. The provider is detected automatically.
+          This key powers Bulk AI profile changes.
+        </p>
+
+        {aiKey?.has_key && !editingKey ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="nb-input !py-2 font-mono text-sm !bg-paper flex-1 min-w-[140px]">{aiKey.key_preview}</div>
+              <button className="nb-btn" onClick={() => setEditingKey(true)}>Replace key</button>
+              <button className="nb-btn" onClick={removeApiKey}>Remove key</button>
+            </div>
+            <div>
+              <div className="micro-label mb-2">Model</div>
+              <input className="nb-input font-mono !py-2 text-[12px]" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+              <div className="text-[10px] text-muted mt-1">{aiKey.provider_label} ? {aiKey.model}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                className="nb-input !py-2 font-mono text-sm flex-1"
+                placeholder="Paste Vercel AI Gateway or OpenRouter API key"
+                value={apiKeyInput}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                autoComplete="off"
+              />
+              <button className="nb-btn shrink-0" onClick={() => setShowApiKey((v) => !v)}>
+                {showApiKey ? 'Hide' : 'Show'}
+              </button>
+            </div>
+            <div>
+              <div className="micro-label mb-2">Model</div>
+              <input className="nb-input font-mono !py-2 text-[12px]" value={aiModel} onChange={(e) => setAiModel(e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button className="nb-btn-pri" onClick={saveApiKey} disabled={savingKey || !apiKeyInput.trim()}>
+                {savingKey ? 'Checking key...' : 'Save API key'}
+              </button>
+              {aiKey?.has_key && (
+                <button className="nb-btn" onClick={() => { setEditingKey(false); setApiKeyInput('') }} disabled={savingKey}>
+                  Cancel
+                </button>
+              )}
+              <span className="text-[10px] text-muted">Auto-detects Vercel or OpenRouter.</span>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="nb-card p-5">
         <div className="micro-label">Pacing</div>
         <h3 className="display-title text-[20px] mt-1 mb-2">Rate limit window</h3>

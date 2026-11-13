@@ -75,7 +75,8 @@ def _extract_profile_json(content: str) -> dict:
 
 
 async def _generate_ai_profile(api_key: str, model: str, account: Account,
-                               country: str, avoid_names: list[str]):
+                               country: str, avoid_names: list[str],
+                               base_url: str | None = None, provider: str | None = None):
     current = f"{account.first_name or ''} {account.last_name or ''}".strip() or "none"
     avoid = ", ".join(avoid_names[-20:]) or "none"
     system = (
@@ -106,6 +107,7 @@ async def _generate_ai_profile(api_key: str, model: str, account: Account,
     }
     data = await asyncio.to_thread(
         _gateway_request, "POST", "/chat/completions", api_key, payload, 45.0,
+        base_url=base_url, provider=provider,
     )
     choice = (data.get("choices") or [{}])[0]
     content = (choice.get("message") or {}).get("content") or ""
@@ -130,7 +132,8 @@ async def _generate_ai_profile(api_key: str, model: str, account: Account,
 
 
 async def _apply_ai_profile(cli, account: Account, api_key: str, model: str,
-                            avoid_names: list[str]):
+                            avoid_names: list[str], base_url: str | None = None,
+                            provider: str | None = None):
     first = last = ""
     usernames: list[str] = []
     last_error = None
@@ -139,6 +142,7 @@ async def _apply_ai_profile(cli, account: Account, api_key: str, model: str,
         try:
             first, last, usernames = await _generate_ai_profile(
                 api_key, model, account, country, avoid_names,
+                base_url=base_url, provider=provider,
             )
             break
         except Exception as e:
@@ -209,9 +213,11 @@ async def bulk_ai_profiles(body: BulkAiProfileIn, db: AsyncSession = Depends(get
         raise HTTPException(400, "Pick at least one account")
     cfg = await ai_store.get_settings()
     if not cfg.get("has_key"):
-        raise HTTPException(400, "Add your AI Gateway key in AI Chat first")
+        raise HTTPException(400, "Add your AI API key in Settings ? AI provider first")
     api_key = cfg["api_key"]
     model = cfg.get("model") or ai_store.DEFAULT_MODEL
+    base_url = cfg.get("base_url") or ai_store.provider_base(cfg.get("provider"))
+    provider = cfg.get("provider") or ai_store.PROVIDER_VERCEL
 
     res = await db.execute(select(Account).where(Account.id.in_(ids)))
     by_id = {a.id: a for a in res.scalars().all()}
@@ -226,7 +232,10 @@ async def bulk_ai_profiles(body: BulkAiProfileIn, db: AsyncSession = Depends(get
         account = by_id.get(aid)
         if not account:
             return "skipped", "account not found"
-        detail = await _apply_ai_profile(cli, account, api_key, model, avoid_names)
+        detail = await _apply_ai_profile(
+            cli, account, api_key, model, avoid_names,
+            base_url=base_url, provider=provider,
+        )
         return "ok", detail
 
     return StreamingResponse(

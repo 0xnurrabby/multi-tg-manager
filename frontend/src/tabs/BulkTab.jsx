@@ -70,7 +70,7 @@ export default function BulkTab({ accounts, onDone }) {
   async function aiChangeProfiles() {
     if (!ids.length) { toast.error('Select accounts first'); return }
     if (!aiEstimate?.has_key) {
-      toast.error('Add your AI Gateway key in AI Chat first')
+      toast.error('Add your AI API key in Settings ? AI provider first')
       return
     }
     const cost = Number(aiEstimate.estimated_cost_usd || 0)
@@ -185,7 +185,7 @@ export default function BulkTab({ accounts, onDone }) {
               <h3 className="display-title text-[22px] mt-1">Name + username, automatically</h3>
               <p className="text-[12px] text-muted mt-2 max-w-[62ch] leading-5">
                 Random-country human names, posh name-based usernames, Telegram availability
-                checks, and up to 5 username tries per account. Uses the AI Chat model and key.
+                checks, and up to 5 username tries per account. Uses the AI provider model and key from Settings.
               </p>
             </div>
             <span className={'nb-badge ' + (aiEstimate?.has_key ? 'bg-brand-ok text-black' : 'bg-brand-warn text-black')}>
@@ -213,7 +213,7 @@ export default function BulkTab({ accounts, onDone }) {
             <div className="rounded-[12px] p-3 min-w-0" style={{ background: 'rgb(var(--surface) / 0.72)', border: '1px solid var(--hairline)' }}>
               <div className="micro-label">Model</div>
               <div className="font-mono text-[11px] mt-2 truncate" title={aiEstimate?.model || ''}>
-                {(aiEstimate?.model || 'AI Chat model').split('/').pop()}
+                {(aiEstimate?.model || 'AI model').split('/').pop()}
               </div>
             </div>
           </div>
@@ -232,7 +232,7 @@ export default function BulkTab({ accounts, onDone }) {
           </div>
           {!aiEstimate?.has_key && (
             <div className="nb-note nb-note-warn px-3 py-2 text-[11px] mt-3">
-              Add the Vercel AI Gateway key in AI Chat to enable AI changes.
+              Add a Vercel AI Gateway or OpenRouter key in Settings &gt; AI provider to enable AI changes.
             </div>
           )}
         </div>

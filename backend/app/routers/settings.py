@@ -16,7 +16,8 @@ from pathlib import Path
 
 from ..db import get_db
 from ..models import AppSetting, Account
-from ..schemas import SettingsIn, SettingsOut
+from ..schemas import SettingsIn, SettingsOut, AiKeyIn
+from .. import ai_store
 from ..config import settings as env_settings
 from ..tg_manager import manager
 
@@ -161,6 +162,48 @@ async def export_sessions(db: AsyncSession = Depends(get_db)):
         filename=filename,
         background=BackgroundTask(_safe_remove, path),
     )
+
+
+def _public_ai_key(cfg: dict) -> dict:
+    return {
+        "has_key": bool(cfg.get("has_key")),
+        "key_preview": cfg.get("key_preview") or "",
+        "provider": cfg.get("provider") or "vercel",
+        "provider_label": cfg.get("provider_label") or "Vercel AI Gateway",
+        "base_url": cfg.get("base_url") or "",
+        "model": cfg.get("model") or "",
+    }
+
+
+@router.get("/ai_key")
+async def get_ai_key():
+    cfg = await ai_store.get_settings()
+    return _public_ai_key(cfg)
+
+
+@router.put("/ai_key")
+async def save_ai_key(body: AiKeyIn):
+    key = (body.api_key or "").strip()
+    if not key:
+        raise HTTPException(400, "Paste an API key first")
+    current = await ai_store.get_settings()
+    model = (body.model or current.get("model") or ai_store.DEFAULT_MODEL).strip()
+    provider, warning = await ai_store.validate_and_detect(key, model)
+    cfg = await ai_store.save_settings(
+        api_key=key,
+        model=model,
+        provider=provider,
+        base_url=ai_store.provider_base(provider),
+    )
+    out = _public_ai_key(cfg)
+    out["warning"] = warning or ""
+    return out
+
+
+@router.delete("/ai_key")
+async def clear_ai_key():
+    cfg = await ai_store.clear_key()
+    return _public_ai_key(cfg)
 
 
 @router.get("/export")

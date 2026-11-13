@@ -300,6 +300,11 @@ class AiSettingsIn(BaseModel):
     max_turns: Optional[int] = None
 
 
+class AiKeyIn(BaseModel):
+    api_key: str
+    model: Optional[str] = None
+
+
 class AiStartIn(BaseModel):
     account_ids: list[int]
     fill_daily: bool = False
