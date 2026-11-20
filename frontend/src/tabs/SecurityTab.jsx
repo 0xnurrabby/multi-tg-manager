@@ -667,28 +667,62 @@ function Bulk2faPanel({ accounts, onChange }) {
   )
 }
 
-function AutoRecoveryPanel({ accounts, onChange }) {
+function EmailSetupPanel({ accounts, onChange }) {
   const toast = useToast()
   const { progress, run, close } = useBulkProgress()
   const [conc, setConc] = useState(5)
+  const [doLogin, setDoLogin] = useState(true)
+  const [doRecovery, setDoRecovery] = useState(true)
+  const [query, setQuery] = useState('')
+  const [ids, setIds] = useState([])
   const [busy, setBusy] = useState(false)
-  const total = accounts.filter((a) => a.status === 'connected').length
+
+  const connected = accounts.filter((a) => a.status === 'connected')
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? connected.filter((a) =>
+        `${a.first_name || ''} ${a.last_name || ''} ${a.phone || ''} ${a.username || ''}`
+          .toLowerCase()
+          .includes(q))
+    : connected
+  const allChecked = filtered.length > 0 && filtered.every((a) => ids.includes(a.id))
+  const targetCount = ids.length || connected.length
+
+  const toggleAll = () => {
+    if (allChecked) {
+      const drop = new Set(filtered.map((a) => a.id))
+      setIds((arr) => arr.filter((x) => !drop.has(x)))
+    } else {
+      setIds((arr) => Array.from(new Set([...arr, ...filtered.map((a) => a.id)])))
+    }
+  }
+  const toggle = (id) => setIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
 
   async function start() {
-    if (!total) {
+    if (!doLogin && !doRecovery) {
+      toast.error('Tick login email, recovery email, or both')
+      return
+    }
+    const count = ids.length || connected.length
+    if (!count) {
       toast.error('No connected accounts')
       return
     }
     if (!confirm(
-      `Add a 2FA recovery email to all ${total} connected accounts?\n\n` +
-      `• The login email is reused when the NurMail provider owns that mailbox\n` +
-      `• Otherwise a new mailbox is created, read and confirmed automatically\n` +
-      `• ${conc} accounts run in parallel`
+      `Run email setup on ${count} account(s)?\n\n` +
+      `${doLogin ? '• Login email: switch to a readable NurMail mailbox (requires an existing login email)\n' : ''}` +
+      `${doRecovery ? '• Recovery email: same mailbox, 2FA code confirmed automatically\n' : ''}` +
+      `• ${conc} accounts run in parallel, no separate runs needed`
     )) return
     setBusy(true)
     try {
-      await run(`Recovery email · ${total} accounts`, (onEvent) =>
-        Endpoints.autoRecovery({ concurrency: conc }, onEvent))
+      await run(`Email setup · ${count} accounts`, (onEvent) =>
+        Endpoints.autoEmail({
+          account_ids: ids.length ? ids : null,
+          concurrency: conc,
+          login: doLogin,
+          recovery: doRecovery,
+        }, onEvent))
       onChange?.()
     } finally {
       setBusy(false)
@@ -700,12 +734,12 @@ function AutoRecoveryPanel({ accounts, onChange }) {
       <div className="flex items-start sm:items-center gap-4 flex-col sm:flex-row">
         <div className="flex-1">
           <div className="micro-label">Bulk action</div>
-          <div className="display-title text-[20px] mt-1">Auto recovery email</div>
+          <div className="display-title text-[20px] mt-1">Login + recovery email</div>
           <div className="text-sm text-muted mt-1">
-            Adds the 2FA recovery email to all <b>{total}</b> connected accounts in one
-            click. Accounts that already have a <span className="font-mono">@nurmail.fun</span> recovery
-            email are skipped; others get the login email when available, otherwise a
-            new mailbox.
+            One run does both. The login mailbox is reused for the recovery email;
+            if that is not possible a fresh NurMail mailbox is generated. Accounts
+            without any login email can only get a recovery email (Telegram blocks
+            the first login email through an app).
           </div>
         </div>
         <label className="text-xs">
@@ -721,9 +755,59 @@ function AutoRecoveryPanel({ accounts, onChange }) {
           </select>
         </label>
         <button className="nb-btn-pri w-full sm:w-auto" disabled={busy} onClick={start}>
-          {busy ? 'Working…' : `Start auto recovery (${total})`}
+          {busy ? 'Working…' : `Start email setup (${targetCount})`}
         </button>
       </div>
+
+      <div className="flex flex-wrap items-center gap-4 mt-3 text-xs">
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={doLogin} onChange={(e) => setDoLogin(e.target.checked)} />
+          Login email
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={doRecovery} onChange={(e) => setDoRecovery(e.target.checked)} />
+          Recovery email
+        </label>
+        <span className="text-muted">
+          {ids.length ? `${ids.length} selected` : `all ${connected.length} connected (none selected)`}
+        </span>
+      </div>
+
+      <div className="mt-3">
+        <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <input
+            className="nb-input !py-1 text-sm flex-1 min-w-[200px]"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name, phone, country code or @username…"
+          />
+          <button className="nb-btn !py-1 !px-3 text-[11px]" onClick={toggleAll}>
+            {allChecked ? 'Clear shown' : `Select all shown (${filtered.length})`}
+          </button>
+          <button className="nb-btn !py-1 !px-3 text-[11px]" onClick={() => setIds([])}>Clear all</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-40 overflow-auto pr-1">
+          {filtered.slice(0, 400).map((a) => (
+            <label key={a.id} className={
+              'flex items-center gap-2 px-2 py-1 rounded-full cursor-pointer text-[12px] transition-colors ' +
+              (ids.includes(a.id)
+                ? 'bg-brand-pri/30 text-ink'
+                : 'text-muted hover:bg-[rgb(var(--ink)/0.04)] hover:text-ink')
+            }>
+              <input type="checkbox" className="shrink-0" checked={ids.includes(a.id)} onChange={() => toggle(a.id)} />
+              <span className="truncate">{((a.first_name || '') + ' ' + (a.last_name || '')).trim() || a.phone}</span>
+              <span className="text-[10px] font-mono text-muted truncate">{a.phone}</span>
+            </label>
+          ))}
+          {filtered.length === 0 && (
+            <div className="text-xs text-muted px-2 py-3">No account matches “{query}”.</div>
+          )}
+        </div>
+        {filtered.length > 400 && (
+          <div className="text-[10px] text-muted mt-1">Showing the first 400 matches — refine the search.</div>
+        )}
+      </div>
+
       <ProgressModal progress={progress} onClose={close} />
     </div>
   )
@@ -1199,7 +1283,7 @@ export default function SecurityTab({ accounts, focusAlert, focusAccountId, focu
       {showTools && (
         <>
           <NurMailProviderCard />
-          <AutoRecoveryPanel accounts={accounts} onChange={onChange} />
+          <EmailSetupPanel accounts={accounts} onChange={onChange} />
           <BulkTerminateSessionsPanel accounts={accounts} onChange={onChange} />
           <Bulk2faPanel accounts={accounts} onChange={onChange} />
           <AccountTtlPanel accounts={accounts} onChange={onChange} />

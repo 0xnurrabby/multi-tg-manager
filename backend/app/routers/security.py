@@ -31,7 +31,7 @@ from ..models import SecurityMessage, Account, AppSetting
 from ..schemas import (
     SecurityMessageOut, TgSessionOut, Bulk2faIn, PressServiceButtonIn,
     EmailLoginSendIn, EmailLoginVerifyIn, AutoDeclineIn, AccountTtlIn, ResetCancelIn,
-    RecoveryIn, RecoveryConfirmIn, AutoRecoveryIn, NurMailIn, Bulk2faOffIn,
+    RecoveryIn, RecoveryConfirmIn, AutoRecoveryIn, NurMailIn, Bulk2faOffIn, EmailAutoIn,
 )
 from ..tg_manager import manager
 from .. import secrets_store
@@ -749,19 +749,33 @@ async def _apply_recovery_email(cli, password: str, email: str) -> bool:
 
     Returns False when Telegram wants the code from that mailbox confirmed.
     """
-    pwd = await cli(GetPasswordRequest())
-    if not getattr(pwd, "has_password", False):
-        raise ValueError("This account has no 2FA password yet, so there is nothing to recover")
-    pwd.new_algo.salt1 += os.urandom(32)
-    check = pwd_mod.compute_check(pwd, password)
-    try:
-        await cli(UpdatePasswordSettingsRequest(
-            password=check,
-            new_settings=tg_account_types.PasswordInputSettings(email=email),
-        ))
-    except EmailUnconfirmedError:
-        return False
-    return True
+    last_error: Exception | None = None
+    for attempt in range(2):
+        pwd = await cli(GetPasswordRequest())
+        if not getattr(pwd, "has_password", False):
+            raise ValueError("This account has no 2FA password yet, so there is nothing to recover")
+        pwd.new_algo.salt1 += os.urandom(32)
+        check = pwd_mod.compute_check(pwd, password)
+        try:
+            await cli(UpdatePasswordSettingsRequest(
+                password=check,
+                new_settings=tg_account_types.PasswordInputSettings(email=email),
+            ))
+            return True
+        except EmailUnconfirmedError:
+            return False
+        except Exception as e:
+            last_error = e
+            text = str(e).upper()
+            # Telegram rotates the SRP challenge after security settings change
+            # (for example right after a login-email edit); refetch and retry.
+            if "SRP" in text and attempt < 1:
+                await asyncio.sleep(2)
+                continue
+            raise
+    if last_error:
+        raise last_error
+    return False
 
 
 async def _save_recovery_email(account_id: int, email: str) -> None:
@@ -925,6 +939,122 @@ async def confirm_recovery_email(account_id: int, body: RecoveryConfirmIn):
     return {"ok": True, "message": "Recovery email confirmed"}
 
 
+@router.post("/email/auto")
+async def auto_email_setup(body: EmailAutoIn, db: AsyncSession = Depends(get_db)):
+    """Set the login email and the 2FA recovery email together, one run.
+
+    Per account: keep a known login email when the provider owns it; otherwise
+    create a mailbox and switch the login email to it. The recovery email uses
+    the same address (a fresh one is generated only when that is not possible).
+    """
+    client = await _nurmail_client(db)
+    if not body.login and not body.recovery:
+        raise HTTPException(400, "Pick login email, recovery email, or both")
+    conc = max(1, min(int(body.concurrency or 5), 10))
+
+    q = select(Account).where(Account.status != "banned").order_by(Account.id)
+    if body.account_ids:
+        q = q.where(Account.id.in_(body.account_ids))
+    res = await db.execute(q)
+    accounts = [
+        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+        for a in res.scalars().all()
+    ]
+
+    async def _new_mailbox() -> str:
+        box = await asyncio.to_thread(client.create_mailbox)
+        return str(box.get("address") or "").lower()
+
+    async def _save_login(aid: int, email: str) -> None:
+        async with AsyncSessionLocal() as s:
+            acc = await s.get(Account, aid)
+            if acc:
+                acc.login_email_address = email
+                await s.commit()
+
+    async def _run(cli, aid):
+        async with AsyncSessionLocal() as s:
+            acc = await s.get(Account, aid)
+            if not acc:
+                raise ValueError("account not found")
+            phone = acc.phone
+            known = (acc.login_email_address or "").strip().lower()
+            pattern = (acc.login_email_pattern or "").strip()
+
+        password = ""
+        if body.recovery:
+            password = await secrets_store.get_2fa(phone)
+            if not password:
+                raise ValueError("2FA password not saved for this account")
+
+        parts: list[str] = []
+        target = ""
+        if known:
+            try:
+                if await asyncio.to_thread(client.has_mailbox, known):
+                    target = known
+            except nurmail.NurMailError:
+                target = ""
+        if not target and (body.recovery or body.login):
+            target = await _new_mailbox()
+
+        # Recovery first: changing the login email rotates Telegram's SRP
+        # challenge, which would make the immediate password-settings call fail.
+        if body.recovery:
+            email = target
+            try:
+                since = await asyncio.to_thread(client.latest_message_id, email)
+                done = await _apply_recovery_email(cli, password, email)
+                if not done:
+                    code = await asyncio.to_thread(client.wait_otp, email, 15, 75, since)
+                    await cli(ConfirmPasswordEmailRequest(code=code))
+                await _save_recovery_email(aid, email)
+                parts.append(f"recovery → {email}")
+            except Exception as e:
+                last = str(e)[:120]
+                # one fallback with a fresh mailbox
+                email = await _new_mailbox()
+                since = await asyncio.to_thread(client.latest_message_id, email)
+                done = await _apply_recovery_email(cli, password, email)
+                if not done:
+                    code = await asyncio.to_thread(client.wait_otp, email, 15, 75, since)
+                    await cli(ConfirmPasswordEmailRequest(code=code))
+                await _save_recovery_email(aid, email)
+                parts.append(f"recovery → {email} (fallback after {last})")
+                target = email
+
+        if body.login:
+            if not pattern:
+                parts.append("login: Telegram does not allow the first login email")
+            elif known and target == known:
+                parts.append(f"login already {known}")
+            else:
+                addr = target
+                try:
+                    since = await asyncio.to_thread(client.latest_message_id, addr)
+                    await cli(SendVerifyEmailCodeRequest(
+                        EmailVerifyPurposeLoginChange(), addr,
+                    ))
+                    code = await asyncio.to_thread(client.wait_otp, addr, 15, 75, since)
+                    await cli(VerifyEmailRequest(
+                        EmailVerifyPurposeLoginChange(), EmailVerificationCode(code),
+                    ))
+                    await _refresh_email_status(cli, aid)
+                    await _save_login(aid, addr)
+                    parts.append(f"login → {addr}")
+                except Exception as e:
+                    parts.append(f"login failed: {str(e)[:120]}")
+
+        if not parts:
+            return "skipped", "nothing to do"
+        return "ok", " · ".join(parts)
+
+    return StreamingResponse(
+        bulk_stream(accounts, _run, concurrency=conc),
+        media_type="application/x-ndjson",
+    )
+
+
 @router.post("/recovery/auto")
 async def auto_recovery(body: AutoRecoveryIn, db: AsyncSession = Depends(get_db)):
     """Add a 2FA recovery email to many accounts at once.
@@ -955,9 +1085,10 @@ async def auto_recovery(body: AutoRecoveryIn, db: AsyncSession = Depends(get_db)
         return str(box.get("address") or "").lower()
 
     async def _confirm(cli, password: str, email: str):
+        since = await asyncio.to_thread(client.latest_message_id, email)
         done = await _apply_recovery_email(cli, password, email)
         if not done:
-            code = await asyncio.to_thread(client.wait_otp, email)
+            code = await asyncio.to_thread(client.wait_otp, email, 15, 75, since)
             await cli(ConfirmPasswordEmailRequest(code=code))
 
     async def _run(cli, aid):

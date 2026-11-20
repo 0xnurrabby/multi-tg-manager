@@ -303,6 +303,13 @@ class AutoRecoveryIn(BaseModel):
     concurrency: int = 5
 
 
+class EmailAutoIn(BaseModel):
+    account_ids: Optional[list[int]] = None
+    concurrency: int = 5
+    login: bool = True
+    recovery: bool = True
+
+
 class NurMailIn(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None

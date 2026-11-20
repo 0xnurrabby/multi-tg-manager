@@ -69,6 +69,13 @@ class NurMail:
             for m in (data.get("mailboxes") or [])
         )
 
+    def latest_message_id(self, address: str) -> int:
+        """Highest message id in the mailbox, used as `since` for the next OTP."""
+        data = self._request(
+            "GET", f"/mailboxes/{urllib.parse.quote(address)}/messages?limit=1",
+        )
+        return int((data or {}).get("nextSince") or 0)
+
     def wait_otp(self, address: str, wait: int = 15, timeout: int = 60, since: int = 0) -> str:
         deadline = time.time() + max(15, int(timeout))
         wait = max(0, min(15, int(wait)))
