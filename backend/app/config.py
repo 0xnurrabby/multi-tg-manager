@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     LOGIN_MAX_ATTEMPTS: int = 5
     LOGIN_WINDOW_MIN: int = 15
 
+    # NurMail API (server-side only). Used to read verification codes sent to a
+    # mailbox created for an account, e.g. when adding a 2FA recovery email.
+    NURMAIL_API_KEY: str = ""
+    NURMAIL_BASE_URL: str = "https://nurmail.fun/api/v1"
+
     @property
     def sessions_path(self) -> Path:
         p = Path(self.SESSIONS_DIR)

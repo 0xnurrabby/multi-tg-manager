@@ -14,6 +14,8 @@ class AccountOut(BaseModel):
     status: str
     has_2fa: bool
     login_email_pattern: str = ""
+    login_email_address: str = ""
+    recovery_email: str = ""
     email_checked_at: Optional[datetime] = None
     is_online: bool
     last_seen: Optional[datetime] = None
@@ -46,6 +48,7 @@ class StatsOut(BaseModel):
     with_2fa: int
     with_email: int = 0
     unread_security: int
+    reset_requests: int = 0
 
 
 class SendCodeIn(BaseModel):
@@ -276,6 +279,44 @@ class EmailLoginSendIn(BaseModel):
 
 class EmailLoginVerifyIn(BaseModel):
     email: str
+    code: str
+
+
+class AccountTtlIn(BaseModel):
+    days: int
+    # Empty/None means every connected account.
+    account_ids: Optional[list[int]] = None
+
+
+class ResetCancelIn(BaseModel):
+    # Optional phone code, if Telegram sent it by SMS instead of to the app.
+    code: Optional[str] = None
+
+
+class Bulk2faOffIn(BaseModel):
+    account_ids: list[int]
+    password_bank: list[str] = Field(default_factory=list)
+
+
+class AutoRecoveryIn(BaseModel):
+    account_ids: Optional[list[int]] = None
+    concurrency: int = 5
+
+
+class NurMailIn(BaseModel):
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    clear: bool = False
+
+
+class RecoveryIn(BaseModel):
+    # Empty + create_mailbox=false does nothing; empty + true creates one.
+    email: Optional[str] = None
+    create_mailbox: bool = False
+    mailbox_name: Optional[str] = None
+
+
+class RecoveryConfirmIn(BaseModel):
     code: str
 
 

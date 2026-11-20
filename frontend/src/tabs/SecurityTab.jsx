@@ -3,6 +3,9 @@ import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { fmtTime } from '../lib/util'
 import ProgressModal from '../components/ProgressModal.jsx'
+import LoginEmailCard from '../components/LoginEmailCard.jsx'
+import RecoveryEmailCard from '../components/RecoveryEmailCard.jsx'
+import NurMailProviderCard from '../components/NurMailProviderCard.jsx'
 import { useBulkProgress } from '../lib/useBulkProgress'
 
 const TYPE_COLORS = {
@@ -11,6 +14,7 @@ const TYPE_COLORS = {
   new_login:        'bg-brand-err',
   '2fa_change':     'bg-brand-violet',
   account_deletion: 'bg-brand-err',
+  reset_request:    'bg-brand-err',
   unknown:          'bg-white',
 }
 
@@ -289,16 +293,129 @@ export function AccountRow({ account, focus, isSelected, focusTick, focused = fa
   )
 }
 
+const TTL_OPTIONS = [
+  { days: 30, label: '1 month' },
+  { days: 90, label: '3 months' },
+  { days: 180, label: '6 months' },
+  { days: 365, label: '12 months' },
+  { days: 548, label: '18 months' },
+  { days: 730, label: '24 months' },
+]
+
+// Telegram's "If away for": how long an account may stay unopened before it is
+// deleted. Telegram accepts only 30/90/180/365/548/730 days.
+function AccountTtlPanel({ accounts, onChange }) {
+  const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
+  const [busy, setBusy] = useState(false)
+  const [scanBusy, setScanBusy] = useState(false)
+  const [tally, setTally] = useState(null)
+  const connectedCount = accounts.filter((a) => a.status === 'connected').length
+
+  async function scan() {
+    if (accounts.length === 0) {
+      toast.error('No accounts available')
+      return
+    }
+    setScanBusy(true)
+    const counts = {}
+    try {
+      await run(`Self-destruct timers - ${accounts.length} accounts`, (onEvent) =>
+        Endpoints.ttlScan((evt) => {
+          if (evt.type === 'progress' && evt.status === 'ok') {
+            const m = /(\d+)\s*days/.exec(evt.detail || '')
+            if (m) counts[m[1]] = (counts[m[1]] || 0) + 1
+          }
+          onEvent(evt)
+        }))
+      setTally(counts)
+    } finally {
+      setScanBusy(false)
+    }
+  }
+
+  async function apply(days, label) {
+    if (accounts.length === 0) {
+      toast.error('No accounts available')
+      return
+    }
+    if (!confirm(
+      `Set "If away for" to ${label} on all ${connectedCount} connected account(s)?\n\n` +
+      `Telegram deletes an account only if it is not opened within that period. ` +
+      `A longer value keeps the accounts safer.`
+    )) return
+    setBusy(true)
+    try {
+      await run(`Self-destruct ${label} - ${connectedCount} accounts`, (onEvent) =>
+        Endpoints.ttlSet(days, null, onEvent))
+      onChange?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="nb-card p-4 mb-4">
+      <div className="flex items-start sm:items-center gap-4 flex-col sm:flex-row">
+        <div className="flex-1">
+          <div className="micro-label">Bulk action</div>
+          <div className="display-title text-[20px] mt-1">Account self-destruct</div>
+          <div className="text-sm text-muted mt-1">
+            Sets the same <b>“If away for”</b> period on all <b>{connectedCount}</b> connected
+            accounts in one click — longer is safer, shorter deletes unused accounts sooner.
+          </div>
+        </div>
+        <button className="nb-btn w-full sm:w-auto" disabled={scanBusy} onClick={scan}>
+          {scanBusy ? 'Reading…' : 'Read current timers'}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 mt-3">
+        {TTL_OPTIONS.map((o) => (
+          <button
+            key={o.days}
+            className="nb-btn-pri !py-1.5 !px-4 text-xs"
+            disabled={busy}
+            onClick={() => apply(o.days, o.label)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
+      {tally && (
+        <div className="mt-4">
+          <div className="micro-label mb-2">Current values</div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(tally)
+              .sort((a, b) => Number(a[0]) - Number(b[0]))
+              .map(([days, n]) => (
+                <span key={days} className="nb-badge bg-white text-ink">{days} days · {n}</span>
+              ))}
+            {Object.keys(tally).length === 0 && (
+              <span className="text-xs text-muted">Nothing read yet.</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <ProgressModal progress={progress} onClose={close} />
+    </div>
+  )
+}
+
 // Bulk change/set the Two-Step (2FA) password across many accounts at once.
 function Bulk2faPanel({ accounts, onChange }) {
   const toast = useToast()
   const { progress, run, close } = useBulkProgress()
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState('on')          // 'on' | 'off'
   const [ids, setIds] = useState([])
+  const [query, setQuery] = useState('')
   const [newPwd, setNewPwd] = useState('')
   const [newPwd2, setNewPwd2] = useState('')
   const [hint, setHint] = useState('')
-  const [bank, setBank] = useState([])        // current-password attempt bank (max 5)
+  const [bank, setBank] = useState([])            // current-password attempt bank (max 5)
   const [bankInput, setBankInput] = useState('')
   const [showPwd, setShowPwd] = useState(false)
   const [knownCount, setKnownCount] = useState(null)
@@ -309,12 +426,29 @@ function Bulk2faPanel({ accounts, onChange }) {
     Endpoints.twofaKnown().then((r) => setKnownCount(r?.count ?? 0)).catch(() => setKnownCount(null))
   }, [open])
 
-  const allChecked = ids.length === accounts.length && accounts.length > 0
-  const no2fa = accounts.filter((a) => !a.has_2fa)
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? accounts.filter((a) =>
+        `${a.first_name || ''} ${a.last_name || ''} ${a.phone || ''} ${a.username || ''}`
+          .toLowerCase()
+          .includes(q))
+    : accounts
+
+  const allChecked = filtered.length > 0 && filtered.every((a) => ids.includes(a.id))
+  const no2fa = filtered.filter((a) => !a.has_2fa)
+  const with2fa = filtered.filter((a) => a.has_2fa)
   const selectedAccounts = accounts.filter((a) => ids.includes(a.id))
   const allNo2fa = ids.length > 0 && selectedAccounts.every((a) => !a.has_2fa)
   const anyWith2fa = selectedAccounts.some((a) => a.has_2fa)
-  const toggleAll = () => setIds(allChecked ? [] : accounts.map((a) => a.id))
+
+  const toggleAll = () => {
+    if (allChecked) {
+      const drop = new Set(filtered.map((a) => a.id))
+      setIds((arr) => arr.filter((x) => !drop.has(x)))
+    } else {
+      setIds((arr) => Array.from(new Set([...arr, ...filtered.map((a) => a.id)])))
+    }
+  }
   const toggle = (id) => setIds((arr) => arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
 
   function addBank() {
@@ -328,6 +462,22 @@ function Bulk2faPanel({ accounts, onChange }) {
 
   async function start() {
     if (ids.length === 0) { toast.error('Pick at least one account'); return }
+
+    if (mode === 'off') {
+      if (!confirm(
+        `Turn OFF Two-Step Verification on ${ids.length} account(s)?\n\n` +
+        `Each account's remembered password is tried first` +
+        `${bank.length ? `, then your ${bank.length} listed password(s)` : ''} ` +
+        `(max 5 tries per account).`
+      )) return
+      setBusy(true)
+      await run(`2FA off — ${ids.length} account(s)`, (onEvent) =>
+        Endpoints.bulk2faOff({ account_ids: ids, password_bank: bank }, onEvent))
+      setBusy(false)
+      onChange?.()
+      return
+    }
+
     if (!newPwd) { toast.error('Enter the new 2FA password'); return }
     if (newPwd.trim() !== newPwd2.trim()) { toast.error('New passwords do not match'); return }
     if (!confirm(
@@ -341,7 +491,7 @@ function Bulk2faPanel({ accounts, onChange }) {
     await run(`Bulk 2FA — ${ids.length} account(s)`, (onEvent) =>
       Endpoints.bulk2fa({ account_ids: ids, new_password: newPwd, hint, password_bank: bank }, onEvent))
     setBusy(false)
-    onChange?.()  // refresh 2FA counts
+    onChange?.()
   }
 
   return (
@@ -357,86 +507,131 @@ function Bulk2faPanel({ accounts, onChange }) {
 
       {open && (
         <div className="mt-4 space-y-4">
-          <div className="text-sm text-muted leading-6">
-            Sets a new Two-Step password on every selected account. Accounts <b>without</b> 2FA get it
-            turned on. Accounts that <b>already have</b> 2FA need their current password — we try each
-            account's remembered password first (saved when you logged in), then the list below, at most
-            5 tries per account.
-            {knownCount != null && <> We currently remember <b>{knownCount}</b> password{knownCount === 1 ? '' : 's'} from login.</>}
+          <div className="flex flex-wrap gap-1">
+            <button
+              className={'nb-tab ' + (mode === 'on' ? 'nb-tab-active' : '')}
+              onClick={() => setMode('on')}
+            >
+              Turn on / change
+            </button>
+            <button
+              className={'nb-tab ' + (mode === 'off' ? 'nb-tab-active' : '')}
+              onClick={() => setMode('off')}
+            >
+              Turn off
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <label>
-              <div className="micro-label mb-2">New 2FA password</div>
-              <input type={showPwd ? 'text' : 'password'} className="nb-input" value={newPwd}
-                onChange={(e) => setNewPwd(e.target.value)} placeholder="new password for all" />
-            </label>
-            <label>
-              <div className="micro-label mb-2">Confirm new password</div>
-              <input type={showPwd ? 'text' : 'password'} className="nb-input" value={newPwd2}
-                onChange={(e) => setNewPwd2(e.target.value)} placeholder="repeat new password" />
-            </label>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <label className="flex items-center gap-2 text-xs">
-              <input type="checkbox" checked={showPwd} onChange={(e) => setShowPwd(e.target.checked)} />
-              Show passwords
-            </label>
-            <label className="flex items-center gap-2 text-xs flex-1 min-w-[180px]">
-              <span className="micro-label">Hint, optional</span>
-              <input className="nb-input !py-1" maxLength={20} value={hint}
-                onChange={(e) => setHint(e.target.value)} placeholder="max 20 chars" />
-            </label>
-          </div>
+          {mode === 'on' ? (
+            <>
+              <div className="text-sm text-muted leading-6">
+                Sets a new Two-Step password on every selected account. Accounts <b>without</b> 2FA
+                get it turned on. Accounts that <b>already have</b> 2FA need their current password —
+                we try each account's remembered password first (saved when you logged in), then the
+                list below, at most 5 tries per account.
+                {knownCount != null && <> We currently remember <b>{knownCount}</b> password{knownCount === 1 ? '' : 's'} from login.</>}
+              </div>
 
-          {/* current-password attempt bank */}
-          {anyWith2fa && (
-          <div className="nb-card-sm p-3">
-            <div className="micro-label mb-2">Current passwords to try, max 5</div>
-            <div className="text-[11px] text-muted mb-3">
-              For accounts that already have 2FA with a password we don't remember. Tried in order until one works.
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <label>
+                  <div className="micro-label mb-2">New 2FA password</div>
+                  <input type={showPwd ? 'text' : 'password'} className="nb-input" value={newPwd}
+                    onChange={(e) => setNewPwd(e.target.value)} placeholder="new password for all" />
+                </label>
+                <label>
+                  <div className="micro-label mb-2">Confirm new password</div>
+                  <input type={showPwd ? 'text' : 'password'} className="nb-input" value={newPwd2}
+                    onChange={(e) => setNewPwd2(e.target.value)} placeholder="repeat new password" />
+                </label>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={showPwd} onChange={(e) => setShowPwd(e.target.checked)} />
+                  Show passwords
+                </label>
+                <label className="flex items-center gap-2 text-xs flex-1 min-w-[180px]">
+                  <span className="micro-label">Hint, optional</span>
+                  <input className="nb-input !py-1" maxLength={20} value={hint}
+                    onChange={(e) => setHint(e.target.value)} placeholder="max 20 chars" />
+                </label>
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-muted leading-6">
+              Removes the Two-Step password from every selected account, so they log in with just
+              the code. Each account's remembered password is tried first, then the list below
+              (max 5 tries per account).
+              {knownCount != null && <> We currently remember <b>{knownCount}</b> password{knownCount === 1 ? '' : 's'}.</>}
             </div>
-            <div className="flex gap-2 mb-2">
-              <input type={showPwd ? 'text' : 'password'} className="nb-input !py-1 text-sm" value={bankInput}
-                onChange={(e) => setBankInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addBank() } }}
-                placeholder="add a current password" disabled={bank.length >= 5} />
-              <button className="nb-btn !px-3" onClick={addBank} disabled={bank.length >= 5}>Add</button>
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {bank.length === 0 && <span className="text-[11px] text-muted">No passwords added yet.</span>}
-              {bank.map((p, i) => (
-                <span key={i} className="nb-badge bg-white text-ink flex items-center gap-1">
-                  <span className="font-mono text-[11px] normal-case">{showPwd ? p : '•'.repeat(Math.min(p.length, 8))}</span>
-                  <button className="opacity-60 hover:opacity-100" onClick={() => removeBank(p)}>✕</button>
-                </span>
-              ))}
-            </div>
-          </div>
           )}
 
-          {allNo2fa && (
+          {/* current-password attempt bank */}
+          {(mode === 'off' || anyWith2fa) && (
+            <div className="nb-card-sm p-3">
+              <div className="micro-label mb-2">Current passwords to try, max 5</div>
+              <div className="text-[11px] text-muted mb-3">
+                For accounts where the saved password doesn't work. Tried in order until one is accepted.
+              </div>
+              <div className="flex gap-2 mb-2">
+                <input type={showPwd ? 'text' : 'password'} className="nb-input !py-1 text-sm" value={bankInput}
+                  onChange={(e) => setBankInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addBank() } }}
+                  placeholder="add a current password" disabled={bank.length >= 5} />
+                <button className="nb-btn !px-3" onClick={addBank} disabled={bank.length >= 5}>Add</button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {bank.length === 0 && <span className="text-[11px] text-muted">No passwords added yet.</span>}
+                {bank.map((p, i) => (
+                  <span key={i} className="nb-badge bg-white text-ink flex items-center gap-1">
+                    <span className="font-mono text-[11px] normal-case">{showPwd ? p : '•'.repeat(Math.min(p.length, 8))}</span>
+                    <button className="opacity-60 hover:opacity-100" onClick={() => removeBank(p)}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {mode === 'on' && allNo2fa && (
             <div className="nb-note nb-note-info px-3 py-2 text-sm">
               All selected accounts have 2FA off, so no current password is needed.
             </div>
           )}
 
-          {/* account picker */}
+          {/* account picker with search */}
           <div className="nb-card-sm p-3">
-            <div className="flex items-center gap-2 mb-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
               <span className="micro-label">Accounts</span>
-              <button className="nb-btn !py-0.5 !px-2 text-[11px]" onClick={toggleAll}>{allChecked ? 'Clear' : 'Select all'}</button>
-              <button
-                className="nb-btn !py-0.5 !px-2 text-[11px]"
-                disabled={no2fa.length === 0}
-                onClick={() => setIds(no2fa.map((a) => a.id))}
-              >
-                Select without 2FA ({no2fa.length})
+              <button className="nb-btn !py-0.5 !px-2 text-[11px]" onClick={toggleAll}>
+                {allChecked ? 'Clear shown' : `Select all shown (${filtered.length})`}
               </button>
+              {mode === 'off' && with2fa.length > 0 && (
+                <button
+                  className="nb-btn !py-0.5 !px-2 text-[11px]"
+                  onClick={() => setIds((arr) => Array.from(new Set([...arr, ...with2fa.map((a) => a.id)])))}
+                >
+                  Select with 2FA ({with2fa.length})
+                </button>
+              )}
+              {mode === 'on' && no2fa.length > 0 && (
+                <button
+                  className="nb-btn !py-0.5 !px-2 text-[11px]"
+                  onClick={() => setIds((arr) => Array.from(new Set([...arr, ...no2fa.map((a) => a.id)])))}
+                >
+                  Select without 2FA ({no2fa.length})
+                </button>
+              )}
               <span className="text-xs opacity-70 ml-auto">{ids.length} selected</span>
             </div>
+
+            <input
+              className="nb-input !py-1 text-sm mb-2"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name, phone, country code or @username…"
+            />
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-48 overflow-auto pr-1">
-              {accounts.map((a) => (
+              {filtered.map((a) => (
                 <label key={a.id} className={
                   'flex items-center gap-2 px-2 py-1.5 rounded-full cursor-pointer text-[12px] transition-colors ' +
                   (ids.includes(a.id)
@@ -445,16 +640,24 @@ function Bulk2faPanel({ accounts, onChange }) {
                 }>
                   <input type="checkbox" className="shrink-0" checked={ids.includes(a.id)} onChange={() => toggle(a.id)} />
                   <span className="truncate">{((a.first_name || '') + ' ' + (a.last_name || '')).trim() || a.phone}</span>
+                  <span className="text-[10px] font-mono text-muted truncate">{a.phone}</span>
                   {a.has_2fa
                     ? <span className="text-[9px] font-mono text-brand-info ml-auto shrink-0" title="already has 2FA">2FA</span>
                     : <span className="text-[9px] font-mono text-muted ml-auto shrink-0" title="no 2FA yet">off</span>}
                 </label>
               ))}
+              {filtered.length === 0 && (
+                <div className="text-xs text-muted px-2 py-3">No account matches “{query}”.</div>
+              )}
             </div>
           </div>
 
           <button className="nb-btn-pri w-full" disabled={busy} onClick={start}>
-            {busy ? 'Working...' : `${allNo2fa ? 'Add 2FA to' : 'Change 2FA on'} ${ids.length} account${ids.length === 1 ? '' : 's'}`}
+            {busy
+              ? 'Working...'
+              : mode === 'off'
+                ? `Turn off 2FA on ${ids.length} account${ids.length === 1 ? '' : 's'}`
+                : `${allNo2fa ? 'Add 2FA to' : 'Change 2FA on'} ${ids.length} account${ids.length === 1 ? '' : 's'}`}
           </button>
         </div>
       )}
@@ -464,57 +667,77 @@ function Bulk2faPanel({ accounts, onChange }) {
   )
 }
 
+function AutoRecoveryPanel({ accounts, onChange }) {
+  const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
+  const [conc, setConc] = useState(5)
+  const [busy, setBusy] = useState(false)
+  const total = accounts.filter((a) => a.status === 'connected').length
+
+  async function start() {
+    if (!total) {
+      toast.error('No connected accounts')
+      return
+    }
+    if (!confirm(
+      `Add a 2FA recovery email to all ${total} connected accounts?\n\n` +
+      `• The login email is reused when the NurMail provider owns that mailbox\n` +
+      `• Otherwise a new mailbox is created, read and confirmed automatically\n` +
+      `• ${conc} accounts run in parallel`
+    )) return
+    setBusy(true)
+    try {
+      await run(`Recovery email · ${total} accounts`, (onEvent) =>
+        Endpoints.autoRecovery({ concurrency: conc }, onEvent))
+      onChange?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="nb-card p-4 mb-4">
+      <div className="flex items-start sm:items-center gap-4 flex-col sm:flex-row">
+        <div className="flex-1">
+          <div className="micro-label">Bulk action</div>
+          <div className="display-title text-[20px] mt-1">Auto recovery email</div>
+          <div className="text-sm text-muted mt-1">
+            Adds the 2FA recovery email to all <b>{total}</b> connected accounts in one
+            click. Accounts that already have a <span className="font-mono">@nurmail.fun</span> recovery
+            email are skipped; others get the login email when available, otherwise a
+            new mailbox.
+          </div>
+        </div>
+        <label className="text-xs">
+          <div className="micro-label mb-1">Parallel</div>
+          <select
+            className="nb-input !py-1"
+            value={conc}
+            onChange={(e) => setConc(Number(e.target.value))}
+          >
+            {[3, 5, 8, 10].map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </label>
+        <button className="nb-btn-pri w-full sm:w-auto" disabled={busy} onClick={start}>
+          {busy ? 'Working…' : `Start auto recovery (${total})`}
+        </button>
+      </div>
+      <ProgressModal progress={progress} onClose={close} />
+    </div>
+  )
+}
+
 function EmailLoginPanel({ accounts, selected, onChange }) {
   const toast = useToast()
   const { progress, run, close } = useBulkProgress()
   const [scanBusy, setScanBusy] = useState(false)
-  const [checking, setChecking] = useState(false)
-  const [step, setStep] = useState('email')
-  const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [sentPattern, setSentPattern] = useState('')
-  const [codeLength, setCodeLength] = useState(0)
-  const [busy, setBusy] = useState(false)
 
   const checked = accounts.filter((a) => !!a.email_checked_at)
   const withEmail = checked.filter((a) => !!(a.login_email_pattern || '').trim()).length
   const withoutEmail = checked.length - withEmail
   const unknown = accounts.length - checked.length
-  const currentEmail = (selected?.login_email_pattern || '').trim()
-  const known = !!selected?.email_checked_at
-  const hasEmail = !!currentEmail
-
-  useEffect(() => {
-    setStep('email')
-    setEmail('')
-    setCode('')
-    setSentPattern('')
-    setCodeLength(0)
-  }, [selected?.id])
-
-  useEffect(() => {
-    if (!selected || selected.status !== 'connected' || selected.email_checked_at) return
-    let alive = true
-    setChecking(true)
-    Endpoints.emailCheck(selected.id)
-      .then(() => { if (alive) onChange?.() })
-      .catch((e) => { if (alive) toast.error(e.message) })
-      .finally(() => { if (alive) setChecking(false) })
-    return () => { alive = false }
-  }, [selected?.id, selected?.status, selected?.email_checked_at])
-
-  async function checkSelected() {
-    if (!selected) return
-    setChecking(true)
-    try {
-      await Endpoints.emailCheck(selected.id)
-      await onChange?.()
-    } catch (e) {
-      toast.error(e.message)
-    } finally {
-      setChecking(false)
-    }
-  }
 
   async function scanAll() {
     if (accounts.length === 0) return
@@ -524,76 +747,6 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
     setScanBusy(false)
     onChange?.()
   }
-
-  function emailErrorMessage(e) {
-    const msg = String(e?.message || '')
-    if (msg.includes('EMAIL_NOT_ALLOWED')) {
-      return 'Telegram rejected this email. It may already be linked to another Telegram account, or this email/alias is not allowed. Try a different email address.'
-    }
-    if (msg.includes('EMAIL_NOT_SETUP')) {
-      return 'This account has no login email yet. Telegram requires setting one in the Telegram app first.'
-    }
-    if (msg.includes('CODE_INVALID')) {
-      return 'That code is incorrect. Use the code sent to the new email, not the Telegram login code.'
-    }
-    if (msg.includes('EMAIL_VERIFY_EXPIRED')) {
-      return 'The email verification code expired. Send a new code.'
-    }
-    if (msg.includes('EMAIL_INVALID')) {
-      return 'Telegram rejected this email address as invalid.'
-    }
-    return msg
-  }
-
-  async function sendCode() {
-    if (!selected) return
-    const value = email.trim()
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) {
-      toast.error('Enter a valid email address')
-      return
-    }
-    setBusy(true)
-    try {
-      const r = await Endpoints.emailSendCode(selected.id, value)
-      setSentPattern(r.email_pattern || value)
-      setCodeLength(r.length || 0)
-      setCode('')
-      setStep('code')
-      toast.success('Verification code sent to the new email')
-    } catch (e) {
-      toast.error(emailErrorMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function verifyCode() {
-    if (!selected) return
-    const value = code.trim()
-    if (!value) {
-      toast.error('Enter the code from the new email')
-      return
-    }
-    setBusy(true)
-    try {
-      const r = await Endpoints.emailVerify(selected.id, email.trim(), value)
-      toast.success(`Login email changed to ${r.email || email.trim()}`)
-      setStep('email')
-      setEmail('')
-      setCode('')
-      setSentPattern('')
-      setCodeLength(0)
-      await onChange?.()
-    } catch (e) {
-      toast.error(emailErrorMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const name = selected
-    ? (((selected.first_name || '') + ' ' + (selected.last_name || '')).trim() || selected.phone)
-    : ''
 
   return (
     <div className="nb-card p-5 mb-4">
@@ -610,7 +763,7 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
       </div>
 
       <div className="text-sm text-muted leading-6 mt-2">
-        Shows how many accounts have a Telegram login email. Select an account from
+        Shows how many accounts have a Telegram login email. Pick an account from
         the sidebar, then change its email with a verification code sent to the new
         address. No 2FA password is needed for this.
       </div>
@@ -633,86 +786,14 @@ function EmailLoginPanel({ accounts, selected, onChange }) {
       <div className="mt-4">
         {!selected && (
           <div className="nb-note nb-note-info px-3 py-2 text-sm">
-            Choose an account from the sidebar to change its login email.
+            Choose an account from the sidebar, or open any account and use its
+            Overview tab.
           </div>
         )}
-
         {selected && (
-          <div className="nb-card-sm p-4">
-            <div className="flex items-start gap-3 flex-col sm:flex-row">
-              <div className="min-w-0">
-                <div className="font-semibold truncate">{name}</div>
-                <div className="font-mono text-[11px] text-muted mt-0.5">{selected.phone}</div>
-              </div>
-              <div className="sm:ml-auto text-left sm:text-right">
-                <div className="micro-label">Current login email</div>
-                <div className="font-mono text-xs mt-1">
-                  {known
-                    ? (hasEmail ? currentEmail : 'Not set')
-                    : (checking ? 'Checking...' : 'Not checked')}
-                </div>
-              </div>
-              <button className="nb-btn !py-1 !px-3 text-xs"
-                disabled={checking || selected.status !== 'connected'} onClick={checkSelected}>
-                {checking ? 'Checking...' : 'Check'}
-              </button>
-            </div>
-
-            {known && !hasEmail && (
-              <div className="nb-note nb-note-warn px-3 py-2 text-sm mt-3">
-                This account has no login email. Telegram only allows changing an
-                existing login email, so set one in the Telegram app first.
-              </div>
-            )}
-
-            {known && hasEmail && (
-              <div className="mt-3 space-y-3">
-                {step === 'email' && (
-                  <>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        className="nb-input flex-1"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="new email address"
-                      />
-                      <button className="nb-btn-pri !px-4" disabled={busy} onClick={sendCode}>
-                        {busy ? 'Sending...' : 'Send code'}
-                      </button>
-                    </div>
-                    <div className="text-[10px] text-muted">
-                      Telegram limits reusing the same login email across accounts. Gmail dot aliases may count as the same mailbox.
-                    </div>
-                  </>
-                )}
-
-                {step === 'code' && (
-                  <div className="space-y-2">
-                    <div className="nb-note nb-note-info px-3 py-2 text-sm">
-                      Code sent to {sentPattern || email.trim()}
-                      {codeLength ? ` (${codeLength} digits)` : ''}. Use the code from
-                      the new email, not the Telegram login code.
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        className="nb-input flex-1"
-                        inputMode="numeric"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        placeholder="code from the new email"
-                      />
-                      <button className="nb-btn-pri !px-4" disabled={busy} onClick={verifyCode}>
-                        {busy ? 'Verifying...' : 'Verify and change'}
-                      </button>
-                      <button className="nb-btn !px-4" disabled={busy} onClick={() => setStep('email')}>
-                        Back
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+          <div className="space-y-3">
+            <LoginEmailCard account={selected} onChange={onChange} className="nb-card-sm p-4" />
+            <RecoveryEmailCard account={selected} onChange={onChange} className="nb-card-sm p-4" />
           </div>
         )}
       </div>
@@ -766,7 +847,213 @@ function BulkTerminateSessionsPanel({ accounts, onChange }) {
   )
 }
 
-function LoginRequestsPanel({ onChange }) {
+// Someone started Telegram's "reset account" (7-day deletion) flow. These live in
+// their own always-visible panel so the cancel link can't get lost in normal
+// security messages.
+export function ResetRequestsPanel({ onChange }) {
+  const toast = useToast()
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState(null)
+  const [needCodeId, setNeedCodeId] = useState(null)
+  const [codeValue, setCodeValue] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const rows = await Endpoints.resetRequests()
+      setItems(rows || [])
+    } catch {
+      // Panel stays quiet; the rest of the tab still works.
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+    const id = setInterval(() => { if (!document.hidden) load() }, 10000)
+    return () => clearInterval(id)
+  }, [load])
+
+  async function markRead(item) {
+    try {
+      await Endpoints.markRead(item.id)
+      await load()
+      onChange?.()
+    } catch (e) {
+      toast.error(e.message)
+    }
+  }
+
+  async function copyLink(url) {
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('Cancel link copied')
+    } catch {
+      toast.error('Could not copy the link')
+    }
+  }
+
+  async function cancelDeletion(item) {
+    if (!confirm(
+      `Cancel the pending deletion of ${item.account_name} (${item.phone})?\n\n` +
+      `Telegram sends a code to the account's own number. If it can't be read ` +
+      `automatically, you can paste the code from your number panel.`
+    )) return
+    setBusyId(item.id)
+    try {
+      const r = await Endpoints.cancelReset(item.id)
+      if (r?.need_code) {
+        setNeedCodeId(item.id)
+        setCodeValue('')
+        toast.info(r.message || 'Enter the SMS code from the account number')
+        return
+      }
+      toast.success('Deletion cancelled — the requester is logged out')
+      setNeedCodeId(null)
+      await load()
+      onChange?.()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function submitCancelCode(item) {
+    const code = codeValue.trim()
+    if (!code) {
+      toast.error('Enter the SMS code from the account number')
+      return
+    }
+    setBusyId(item.id)
+    try {
+      await Endpoints.cancelReset(item.id, code)
+      toast.success('Deletion cancelled — the requester is logged out')
+      setNeedCodeId(null)
+      setCodeValue('')
+      await load()
+      onChange?.()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (loading || items.length === 0) return null
+
+  const urgent = items.filter((i) => i.days_left !== null && i.days_left <= 3).length
+
+  return (
+    <div
+      className="nb-card p-5 mb-4"
+      style={{ borderColor: 'rgb(var(--danger) / 0.55)', boxShadow: 'inset 4px 0 0 rgb(var(--danger))' }}
+    >
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="micro-label" style={{ color: 'rgb(var(--danger))' }}>Urgent · account deletion</div>
+          <div className="display-title text-[24px] mt-1">Account reset requests</div>
+          <div className="text-[12px] text-muted mt-1.5 max-w-[70ch] leading-5">
+            Someone started Telegram&apos;s 7-day account reset on these accounts. If the
+            countdown ends, the account, chats and 2FA password are deleted. Open the
+            cancel link inside a Telegram app where that account is logged in — or use
+            the account&apos;s service message below.
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {urgent > 0 && <span className="nb-badge bg-brand-err">{urgent} urgent</span>}
+          <span className="nb-badge bg-white text-ink">{items.length} open</span>
+        </div>
+      </div>
+
+      <div className="space-y-2 mt-4 max-h-[420px] overflow-y-auto pr-1">
+        {items.map((r) => (
+          <div
+            key={r.id}
+            className="nb-card-sm p-3"
+            style={{ borderColor: 'rgb(var(--danger) / 0.35)' }}
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`nb-badge ${r.days_left !== null && r.days_left <= 3 ? 'bg-brand-err' : 'bg-brand-warn'}`}>
+                {r.days_left !== null ? `${r.days_left}d left` : 'reset'}
+              </span>
+              <span className="font-semibold text-[13px]">{r.account_name}</span>
+              <span className="text-[10px] text-muted font-mono">
+                {r.phone}{r.username ? ` · @${r.username}` : ''}
+              </span>
+              {!r.is_read && <span className="w-1.5 h-1.5 rounded-full bg-brand-err inline-block" />}
+              <span className="text-[10px] text-muted font-mono ml-auto">{fmtTime(r.received_at)}</span>
+            </div>
+            <div className="text-[11px] text-muted mt-1.5 whitespace-pre-wrap line-clamp-3">
+              {r.message_text}
+            </div>
+            {r.action_status === 'Deletion cancelled' ? (
+              <div className="mt-2">
+                <span className="nb-badge bg-brand-ok">Deletion cancelled</span>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <button
+                  className="nb-btn-err !py-1 !px-3 text-xs"
+                  disabled={busyId === r.id}
+                  onClick={() => cancelDeletion(r)}
+                >
+                  {busyId === r.id ? 'Working…' : 'Cancel deletion'}
+                </button>
+                {r.cancel_url ? (
+                  <>
+                    <a className="nb-btn !py-1 !px-3 text-xs" href={r.cancel_url} target="_blank" rel="noreferrer">
+                      Open cancel link
+                    </a>
+                    <button className="nb-btn !py-1 !px-3 text-xs" onClick={() => copyLink(r.cancel_url)}>
+                      Copy link
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-muted">
+                    No cancel link in this message — open the account&apos;s Telegram service messages.
+                  </span>
+                )}
+                <button className="nb-btn !py-1 !px-3 text-xs" onClick={() => markRead(r)}>
+                  Mark as read
+                </button>
+              </div>
+            )}
+
+            {needCodeId === r.id && r.action_status !== 'Deletion cancelled' && (
+              <div className="mt-2 flex flex-col sm:flex-row gap-2">
+                <input
+                  className="nb-input flex-1"
+                  inputMode="numeric"
+                  value={codeValue}
+                  onChange={(e) => setCodeValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submitCancelCode(r) } }}
+                  placeholder="SMS code from the account number"
+                />
+                <button
+                  className="nb-btn-pri !px-4"
+                  disabled={busyId === r.id}
+                  onClick={() => submitCancelCode(r)}
+                >
+                  {busyId === r.id ? 'Confirming…' : 'Confirm cancel'}
+                </button>
+                <button
+                  className="nb-btn !px-3"
+                  onClick={() => { setNeedCodeId(null); setCodeValue('') }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function LoginRequestsPanel({ onChange }) {
   const toast = useToast()
   const [items, setItems] = useState([])
   const [auto, setAuto] = useState(false)
@@ -902,19 +1189,20 @@ export default function SecurityTab({ accounts, focusAlert, focusAccountId, focu
           Every message from the official Telegram account, shown on your phone as
           <b> &quot;Telegram&quot;</b> / <b>+42777</b>, per account. Pick an account
           from the sidebar to see its messages and active sessions. Login approvals
-          include their Confirm and Decline buttons.
+          and reset requests now live in the <b>Urgent</b> tab.
         </div>
         <button className="nb-btn mt-3" onClick={() => setShowTools((v) => !v)}>
           {showTools ? 'Hide bulk security tools' : 'Show bulk security tools'}
         </button>
       </div>
 
-      <LoginRequestsPanel onChange={onChange} />
-
       {showTools && (
         <>
+          <NurMailProviderCard />
+          <AutoRecoveryPanel accounts={accounts} onChange={onChange} />
           <BulkTerminateSessionsPanel accounts={accounts} onChange={onChange} />
           <Bulk2faPanel accounts={accounts} onChange={onChange} />
+          <AccountTtlPanel accounts={accounts} onChange={onChange} />
           <EmailLoginPanel accounts={accounts} selected={selected} onChange={onChange} />
         </>
       )}

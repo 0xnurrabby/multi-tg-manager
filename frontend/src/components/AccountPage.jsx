@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import ProfileTab from '../tabs/ProfileTab'
 import { AccountRow } from '../tabs/SecurityTab'
+import LoginEmailCard from './LoginEmailCard'
+import RecoveryEmailCard from './RecoveryEmailCard'
 import { CopyButton } from '../lib/CopyButton'
 import { fmtTime } from '../lib/util'
 import Icon from './Icon'
@@ -19,9 +21,11 @@ const ACCOUNT_SECTIONS = [
 
 export default function AccountPage({ account, accountNumber, accountTotal, onPrev, onNext, onRefresh, onOpenTab }) {
   const [section, setSection] = useState('overview')
+  const [panel, setPanel] = useState(null)
 
   useEffect(() => {
     setSection('overview')
+    setPanel(null)
   }, [account?.id])
 
   useEffect(() => {
@@ -117,51 +121,86 @@ export default function AccountPage({ account, accountNumber, accountTotal, onPr
       </div>
 
       {section === 'overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          <div className="lg:col-span-2 nb-card p-5">
-            <div className="micro-label">Account summary</div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-              <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
-                <div className="micro-label">Phone</div>
-                <div className="font-mono text-sm mt-1 truncate">{account.phone}</div>
-              </div>
-              <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
-                <div className="micro-label">Username</div>
-                <div className="font-mono text-sm mt-1 truncate">{account.username ? `@${account.username}` : 'Not set'}</div>
-              </div>
-              <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
-                <div className="micro-label">Connection</div>
-                <div className="flex items-center gap-2 mt-1"><StatusBadge status={account.status} /></div>
-              </div>
-              <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
-                <div className="micro-label">Security</div>
-                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  {account.has_2fa ? <span className="nb-badge bg-brand-info">2FA on</span> : <span className="nb-badge bg-brand-warn">2FA off</span>}
-                  {account.unread_security > 0 ? <span className="nb-badge bg-brand-err">{account.unread_security} new</span> : <span className="text-xs text-muted">No new alerts</span>}
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+            <div className="lg:col-span-2 nb-card p-5">
+              <div className="micro-label">Account summary</div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
+                  <div className="micro-label">Phone</div>
+                  <div className="font-mono text-sm mt-1 truncate">{account.phone}</div>
+                </div>
+                <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
+                  <div className="micro-label">Username</div>
+                  <div className="font-mono text-sm mt-1 truncate">{account.username ? `@${account.username}` : 'Not set'}</div>
+                </div>
+                <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
+                  <div className="micro-label">Connection</div>
+                  <div className="flex items-center gap-2 mt-1"><StatusBadge status={account.status} /></div>
+                </div>
+                <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
+                  <div className="micro-label">Security</div>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    {account.has_2fa ? <span className="nb-badge bg-brand-info">2FA on</span> : <span className="nb-badge bg-brand-warn">2FA off</span>}
+                    {account.unread_security > 0 ? <span className="nb-badge bg-brand-err">{account.unread_security} new</span> : <span className="text-xs text-muted">No new alerts</span>}
+                  </div>
+                </div>
+                <LoginEmailCard
+                  account={account}
+                  onChange={onRefresh}
+                  className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3 sm:col-span-2"
+                />
+                <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
+                  <div className="micro-label">Last seen</div>
+                  <div className="text-sm mt-1">{account.last_seen ? fmtTime(account.last_seen) : '?'}</div>
                 </div>
               </div>
-              <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
-                <div className="micro-label">Login email</div>
-                <div className="text-sm mt-1 truncate">{account.login_email_pattern || 'Not set'}</div>
-              </div>
-              <div className="rounded-2xl border border-[color:var(--hairline)] px-4 py-3">
-                <div className="micro-label">Last seen</div>
-                <div className="text-sm mt-1">{account.last_seen ? fmtTime(account.last_seen) : '?'}</div>
+            </div>
+
+            <div className="nb-card p-5">
+              <div className="micro-label">Quick actions</div>
+              <div className="grid grid-cols-1 gap-2 mt-4">
+                <button className="nb-btn w-full justify-start" onClick={() => setPanel((v) => v === 'profile' ? null : 'profile')}>
+                  {panel === 'profile' ? 'Hide profile editor' : 'Edit profile'}
+                </button>
+                <button className="nb-btn w-full justify-start" onClick={() => setPanel((v) => v === 'email' ? null : 'email')}>
+                  {panel === 'email' ? 'Hide email settings' : 'Change login email'}
+                </button>
+                <button className="nb-btn w-full justify-start" onClick={() => setPanel((v) => v === 'security' ? null : 'security')}>
+                  {panel === 'security' ? 'Hide security details' : 'Security & sessions'}
+                </button>
+                <button className="nb-btn w-full justify-start" onClick={() => onOpenTab?.('groups')}>Groups</button>
+                <button className="nb-btn w-full justify-start" onClick={() => onOpenTab?.('messages')}>Messages</button>
+                <button className="nb-btn w-full justify-start" onClick={onRefresh}>Refresh account data</button>
               </div>
             </div>
           </div>
 
-          <div className="nb-card p-5">
-            <div className="micro-label">Quick actions</div>
-            <div className="grid grid-cols-1 gap-2 mt-4">
-              <button className="nb-btn w-full justify-start" onClick={() => setSection('profile')}>Edit profile</button>
-              <button className="nb-btn w-full justify-start" onClick={() => setSection('security')}>Security & sessions</button>
-              <button className="nb-btn w-full justify-start" onClick={() => onOpenTab?.('groups')}>Groups</button>
-              <button className="nb-btn w-full justify-start" onClick={() => onOpenTab?.('messages')}>Messages</button>
-              <button className="nb-btn w-full justify-start" onClick={onRefresh}>Refresh account data</button>
+          {panel === 'profile' && (
+            <div className="rise">
+              <ProfileTab account={account} onRefresh={onRefresh} showChat={false} />
             </div>
-          </div>
-        </div>
+          )}
+
+          {panel === 'email' && (
+            <div className="rise grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+              <LoginEmailCard account={account} onChange={onRefresh} className="nb-card p-5" />
+              <RecoveryEmailCard account={account} onChange={onRefresh} className="nb-card p-5" />
+            </div>
+          )}
+
+          {panel === 'security' && (
+            <div className="rise">
+              <AccountRow
+                key={account.id}
+                account={account}
+                isSelected
+                focused
+                onChange={onRefresh}
+              />
+            </div>
+          )}
+        </>
       )}
 
       {section === 'profile' && (
@@ -169,13 +208,17 @@ export default function AccountPage({ account, accountNumber, accountTotal, onPr
       )}
 
       {section === 'security' && (
-        <AccountRow
-          key={account.id}
-          account={account}
-          isSelected
-          focused
-          onChange={onRefresh}
-        />
+        <div className="space-y-4">
+          <RecoveryEmailCard account={account} onChange={onRefresh} className="nb-card p-5" />
+          <LoginEmailCard account={account} onChange={onRefresh} className="nb-card p-5" />
+          <AccountRow
+            key={account.id}
+            account={account}
+            isSelected
+            focused
+            onChange={onRefresh}
+          />
+        </div>
       )}
     </div>
   )

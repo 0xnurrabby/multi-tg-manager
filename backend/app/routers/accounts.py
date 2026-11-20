@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func, delete, or_
 from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import logging
 import tempfile
@@ -39,6 +39,8 @@ async def _account_to_out(acc: Account, db: AsyncSession, unread: int | None = N
         status=acc.status,
         has_2fa=acc.has_2fa,
         login_email_pattern=acc.login_email_pattern or "",
+        login_email_address=acc.login_email_address or "",
+        recovery_email=acc.recovery_email or "",
         email_checked_at=acc.email_checked_at,
         is_online=acc.is_online,
         last_seen=acc.last_seen,
@@ -58,6 +60,8 @@ def _account_fallback(acc: Account) -> AccountOut:
         status=acc.status,
         has_2fa=acc.has_2fa,
         login_email_pattern=acc.login_email_pattern or "",
+        login_email_address=acc.login_email_address or "",
+        recovery_email=acc.recovery_email or "",
         email_checked_at=acc.email_checked_at,
         is_online=acc.is_online,
         last_seen=acc.last_seen,
@@ -157,9 +161,24 @@ async def stats(db: AsyncSession = Depends(get_db)):
         )
     ) or 0
     unread = await db.scalar(select(func.count(SecurityMessage.id)).where(SecurityMessage.is_read == False)) or 0  # noqa: E712
+    reset_cutoff = datetime.utcnow() - timedelta(days=8)
+    reset_requests = await db.scalar(
+        select(func.count(SecurityMessage.id)).where(
+            SecurityMessage.received_at >= reset_cutoff,
+            or_(
+                SecurityMessage.message_text.ilike("%reset account%"),
+                SecurityMessage.message_text.ilike("%cancel the deletion%"),
+            ),
+            or_(
+                SecurityMessage.action_status.is_(None),
+                SecurityMessage.action_status == "",
+            ),
+        )
+    ) or 0
     return StatsOut(
         total=total, connected=connected, banned=banned, with_2fa=with_2fa,
         with_email=with_email, unread_security=unread,
+        reset_requests=reset_requests,
     )
 
 

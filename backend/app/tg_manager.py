@@ -73,6 +73,9 @@ def classify_777000(text: str) -> str:
         or ("log in" in low and "confirm" in low)
     ):
         return "login_request"
+    # "Request to reset account": someone started the 7-day deletion flow.
+    if "reset account" in low or "request to reset" in low or "cancel the deletion" in low:
+        return "reset_request"
     if re.search(r"login code|\b\d{5}\b", low):
         return "login_code"
     if "new login" in low or "new device" in low:

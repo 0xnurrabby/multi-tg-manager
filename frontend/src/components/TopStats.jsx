@@ -21,6 +21,9 @@ export default function TopStats({ stats, onBellClick }) {
       <Chip label="Banned" value={stats.banned} accent="--accent-rose" />
       <Chip label="2FA" value={stats.with_2fa} accent="--accent-sky" />
       <Chip label="Email" value={stats.with_email ?? 0} accent="--accent-mint" />
+      {stats.reset_requests > 0 && (
+        <Chip label="Reset" value={stats.reset_requests} accent="--accent-rose" />
+      )}
       <button
         onClick={onBellClick}
         className="stat-chip transition-colors hover:border-[color:var(--hairline-strong)]"

@@ -62,6 +62,17 @@ async def _migrate_sqlite(conn):
             "ALTER TABLE security_messages ADD COLUMN action_status VARCHAR(32) DEFAULT ''"
         )
 
+    res = await conn.exec_driver_sql("PRAGMA table_info('accounts')")
+    account_cols = {row[1] for row in res.all()}
+    if "login_email_address" not in account_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE accounts ADD COLUMN login_email_address VARCHAR(255) DEFAULT ''"
+        )
+    if "recovery_email" not in account_cols:
+        await conn.exec_driver_sql(
+            "ALTER TABLE accounts ADD COLUMN recovery_email VARCHAR(255) DEFAULT ''"
+        )
+
     res = await conn.exec_driver_sql("PRAGMA table_info('ai_chat_messages')")
     ai_cols = {row[1] for row in res.all()}
     if "reply_to_text" not in ai_cols:

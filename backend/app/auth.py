@@ -3,9 +3,11 @@ from __future__ import annotations
 import time
 import secrets
 from collections import defaultdict, deque
+from pathlib import Path
 from typing import Optional
 
 import bcrypt
+from dotenv import dotenv_values
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from itsdangerous import TimestampSigner, BadSignature, SignatureExpired
 from pydantic import BaseModel
@@ -14,16 +16,48 @@ from .config import settings
 
 COOKIE_NAME = "mtm_session"
 
-# --- bcrypt hash cache (compute once per process) ---
+# backend/.env — the same file pydantic-settings reads at startup.
+_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
+
+def _env_file_path() -> Path:
+    """Prefer the .env next to the running app, fall back to the CWD one."""
+    if _ENV_FILE.exists():
+        return _ENV_FILE
+    return Path(".env")
+
+
+def _current_password() -> str:
+    """Read APP_PASSWORD straight from .env so edits apply without a restart."""
+    path = _env_file_path()
+    if path.exists():
+        try:
+            value = dotenv_values(path, encoding="utf-8").get("APP_PASSWORD")
+        except Exception:
+            value = None
+        if value:
+            return value
+    return settings.APP_PASSWORD
+
+
+def _pw_bytes(pw: str) -> bytes:
+    # bcrypt only uses the first 72 bytes; truncate so long passwords don't raise.
+    return pw.encode()[:72]
+
+
+# --- bcrypt hash cache (recomputed only when the password itself changes) ---
 _pw_hash: Optional[bytes] = None
+_pw_cached_for: Optional[str] = None
 
 
 def _password_hash() -> bytes:
-    global _pw_hash
-    if _pw_hash is None:
-        if not settings.APP_PASSWORD:
-            raise RuntimeError("APP_PASSWORD not set in .env")
-        _pw_hash = bcrypt.hashpw(settings.APP_PASSWORD.encode(), bcrypt.gensalt(rounds=12))
+    global _pw_hash, _pw_cached_for
+    pw = _current_password()
+    if not pw:
+        raise RuntimeError("APP_PASSWORD not set in backend/.env")
+    if _pw_hash is None or pw != _pw_cached_for:
+        _pw_hash = bcrypt.hashpw(_pw_bytes(pw), bcrypt.gensalt(rounds=12))
+        _pw_cached_for = pw
     return _pw_hash
 
 
@@ -31,7 +65,7 @@ def _verify_password(pw: str) -> bool:
     if not pw:
         return False
     try:
-        return bcrypt.checkpw(pw.encode(), _password_hash())
+        return bcrypt.checkpw(_pw_bytes(pw), _password_hash())
     except Exception:
         return False
 

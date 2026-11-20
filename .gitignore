@@ -19,3 +19,6 @@ backend/static/
 .DS_Store
 *.log
 backend/bin/
+
+.wrangler/
+

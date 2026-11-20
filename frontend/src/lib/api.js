@@ -162,6 +162,9 @@ export const Endpoints = {
   securityMessages: (accountId, onlyUnread) =>
     api.get('/api/security/messages', { account_id: accountId, only_unread: onlyUnread }),
   securityRequests: () => api.get('/api/security/login_requests'),
+  resetRequests: () => api.get('/api/security/reset_requests'),
+  cancelReset: (id, code) =>
+    api.post(`/api/security/reset_requests/${id}/cancel`, { code: code || null }),
   getAutoDecline: () => api.get('/api/security/auto_decline'),
   setAutoDecline: (enabled) => api.put('/api/security/auto_decline', { enabled }),
   markRead: (id) => api.post(`/api/security/messages/${id}/read`),
@@ -177,11 +180,30 @@ export const Endpoints = {
   // streaming change run (tries remembered pw first, then the bank; 5 per account)
   twofaKnown: () => api.get('/api/security/twofa_known'),
   bulk2fa: (payload, onEvent) => streamNDJSON('/api/security/bulk_2fa', payload, onEvent),
+  bulk2faOff: (payload, onEvent) => streamNDJSON('/api/security/bulk_2fa_off', payload, onEvent),
+
+  // account self-destruct ("If away for"): read current values / set 30..730 days
+  ttlScan: (onEvent) => streamNDJSON('/api/security/ttl/scan', {}, onEvent),
+  ttlSet: (days, ids, onEvent) =>
+    streamNDJSON('/api/security/ttl/set', { days, account_ids: ids || null }, onEvent),
 
   emailScan: (onEvent) => streamNDJSON('/api/security/email/scan', {}, onEvent),
   emailCheck: (id) => api.post(`/api/security/email/${id}/check`),
   emailSendCode: (id, email) => api.post(`/api/security/email/${id}/send_code`, { email }),
   emailVerify: (id, email, code) => api.post(`/api/security/email/${id}/verify`, { email, code }),
+
+  // 2FA recovery email (code can be read from a NurMail mailbox)
+  recoveryStatus: (id) => api.get(`/api/security/email/${id}/recovery`),
+  setRecovery: (id, payload) => api.post(`/api/security/email/${id}/recovery`, payload),
+  confirmRecovery: (id, code) =>
+    api.post(`/api/security/email/${id}/recovery/confirm`, { code }),
+
+  // NurMail provider (key/base URL live in the backend settings, never in the UI)
+  nurmailConfig: () => api.get('/api/security/nurmail/config'),
+  saveNurmail: (payload) => api.put('/api/security/nurmail/config', payload),
+  testNurmail: () => api.post('/api/security/nurmail/test'),
+  autoRecovery: (payload, onEvent) =>
+    streamNDJSON('/api/security/recovery/auto', payload, onEvent),
 
 
   joinGroup: (id, target) => api.post(`/api/groups/${id}/join`, { target }),

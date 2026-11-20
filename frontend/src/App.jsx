@@ -13,12 +13,14 @@ import Icon from './components/Icon.jsx'
 import DashboardTab from './tabs/DashboardTab.jsx'
 import StatsTab from './tabs/StatsTab.jsx'
 import SecurityTab from './tabs/SecurityTab.jsx'
+import UrgentTab from './tabs/UrgentTab.jsx'
 import OperationsTab from './tabs/OperationsTab.jsx'
 import SettingsTab from './tabs/SettingsTab.jsx'
 
 const TABS = [
   { id: 'dashboard',  label: 'Overview'   },
   { id: 'security',   label: 'Security'   },
+  { id: 'urgent',     label: 'Urgent'     },
   { id: 'operations', label: 'Operations' },
   { id: 'stats',      label: 'Insights'   },
   { id: 'settings',   label: 'Settings'   },
@@ -206,7 +208,7 @@ export default function App() {
           <div className="flex-1" />
 
           <div className="hidden md:flex">
-            <TopStats stats={stats} onBellClick={() => { setFocusAlert(null); closeAccountRoute(); setTab('security') }} />
+            <TopStats stats={stats} onBellClick={() => { setFocusAlert(null); closeAccountRoute(); setTab('urgent') }} />
           </div>
 
           <div className="hidden lg:flex min-w-0">
@@ -310,6 +312,7 @@ export default function App() {
                   {tab === 'dashboard' && <DashboardTab stats={stats} accounts={accounts} onSelect={openAccount} onOpenAlert={(m) => { setSelectedId(m.account_id); setFocusAlert({ accountId: m.account_id, messageId: m.id, ts: Date.now() }); closeAccountRoute(); setTab('security') }} onChange={() => { refreshStats(); refreshAccounts() }} />}
                   {tab === 'stats'      && <StatsTab accounts={accounts} />}
                   {tab === 'security'   && <SecurityTab accounts={accounts} focusAlert={focusAlert} focusAccountId={selectedId} focusTick={selectTick} onChange={refreshStats} />}
+                  {tab === 'urgent'     && <UrgentTab onChange={refreshStats} />}
                   {tab === 'operations' && <OperationsTab accounts={accounts} selected={selected} onDone={refreshAccounts} active={operationsTab} onChange={setOperationsTab} />}
                   {tab === 'settings'   && <SettingsTab />}
                 </>
