@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { fmtTime } from '../lib/util'
+import { CopyButton } from '../lib/CopyButton'
 
 const CODE_RE = /\b(\d{5,6})\b/
 
@@ -101,7 +102,13 @@ function SellAccount({ account, onChange }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-[14px] truncate">{name}</span>
             <span className="text-[11px] text-muted font-mono">{account.phone}</span>
-            {account.username && <span className="text-[11px] text-muted font-mono">@{account.username}</span>}
+            <CopyButton value={account.phone} label="phone number" />
+            {account.username && (
+              <>
+                <span className="text-[11px] text-muted font-mono">@{account.username}</span>
+                <CopyButton value={account.username} label="username" />
+              </>
+            )}
             <span className="nb-badge bg-brand-warn">2FA off</span>
             {code && <span className="nb-badge bg-brand-ok font-mono">OTP {code}</span>}
           </div>
