@@ -34,7 +34,7 @@ from ..schemas import (
     RecoveryIn, RecoveryConfirmIn, AutoRecoveryIn, NurMailIn, Bulk2faOffIn, EmailAutoIn,
     LogoutAllIn,
 )
-from ..tg_manager import manager
+from ..tg_manager import manager, record_gone_account
 from .. import secrets_store
 from ..utils import bulk_stream, friendly_error
 
@@ -1201,6 +1201,25 @@ async def set_account_ttl(body: AccountTtlIn, db: AsyncSession = Depends(get_db)
     )
 
 
+
+
+async def _forget_account(account_id: int, db: AsyncSession) -> None:
+    """Remove the account from the manager (session file + DB row)."""
+    acc = await db.get(Account, account_id)
+    if not acc:
+        return
+    try:
+        if acc.status != "banned":
+            await record_gone_account(db, acc, "removed")
+    except Exception:
+        pass
+    try:
+        await manager.remove_account_instance(acc)
+    except Exception:
+        pass
+    await db.delete(acc)
+    await db.commit()
+
 @router.post("/sessions/{account_id}/logout_self")
 async def logout_self_session(account_id: int, db: AsyncSession = Depends(get_db)):
     """Log this app's session out, leaving every other device alone."""
@@ -1211,16 +1230,8 @@ async def logout_self_session(account_id: int, db: AsyncSession = Depends(get_db
         await cli.log_out()
     except Exception as e:
         raise HTTPException(400, friendly_error(e)) from None
-    async with AsyncSessionLocal() as s:
-        acc = await s.get(Account, account_id)
-        if acc:
-            acc.status = "disconnected"
-            await s.commit()
-    try:
-        await manager.stop_client(account_id)
-    except Exception:
-        pass
-    return {"ok": True}
+    await _forget_account(account_id, db)
+    return {"ok": True, "removed": True}
 
 
 @router.post("/sessions/{account_id}/logout_all")
@@ -1242,11 +1253,9 @@ async def logout_all_sessions(
     current = next((a for a in res.authorizations if a.current), None)
     others = [a for a in res.authorizations if not a.current]
 
-    keep = body.keep_hash if body else None
-    if keep is None and others:
-        # Default: the newest non-current session is usually the buyer bot that
-        # just logged in.
-        keep = max(others, key=lambda a: a.date_created or 0).hash
+    # The newest non-current session is the buyer (last login). It is never
+    # logged out here, whatever the client sends.
+    keep = max(others, key=lambda a: a.date_created or 0).hash if others else None
 
     terminated = 0
     failed = 0
@@ -1268,15 +1277,7 @@ async def logout_all_sessions(
             self_dropped = True
         except Exception:
             pass
-        async with AsyncSessionLocal() as s:
-            acc = await s.get(Account, account_id)
-            if acc:
-                acc.status = "disconnected"
-                await s.commit()
-        try:
-            await manager.stop_client(account_id)
-        except Exception:
-            pass
+        await _forget_account(account_id, db)
 
     return {
         "ok": True,

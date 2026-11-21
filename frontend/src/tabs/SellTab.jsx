@@ -18,7 +18,6 @@ function SellAccount({ account, onChange }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([])
   const [sessions, setSessions] = useState([])
-  const [keep, setKeep] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
@@ -31,10 +30,6 @@ function SellAccount({ account, onChange }) {
       setMessages((m || []).slice(0, 12))
       const list = s || []
       setSessions(list)
-      const others = list
-        .filter((x) => !x.is_current)
-        .sort((a, b) => (Date.parse(b.date_created || 0) || 0) - (Date.parse(a.date_created || 0) || 0))
-      setKeep(others.length ? others[0].hash : null)
     } finally {
       setBusy(false)
     }
@@ -45,23 +40,23 @@ function SellAccount({ account, onChange }) {
   }, [open, load])
 
   const code = latestCode(messages)
+  // Last logged-in non-current session = the buyer. Never logged out from here.
+  const buyerHash = sessions
+    .filter((s) => !s.is_current)
+    .sort((a, b) => (Date.parse(b.date_created || 0) || 0) - (Date.parse(a.date_created || 0) || 0))[0]?.hash
   const name = `${account.first_name || ''} ${account.last_name || ''}`.trim() || account.phone
 
   async function logoutAll() {
-    const kept = sessions.find((s) => s.hash === keep)
-    const keepText = kept
-      ? `${kept.device || kept.app_name || 'device'} (${kept.platform || '?'})`
-      : 'nothing — all devices are removed'
     if (!confirm(
       `Remove every Telegram session on ${account.phone}?\n\n` +
-      `Kept: ${keepText}\n\n` +
-      `If this app's session is not the kept one, the account disappears from here ` +
-      `and only the kept device (for example the buyer bot) stays.`
+      `The newest device (the buyer that logged in last) is kept automatically.\n` +
+      `Every other device — including this app — is logged out, and the account ` +
+      `is removed from TG Manager.`
     )) return
     setBusy(true)
     try {
-      const r = await Endpoints.logoutAll(account.id, keep)
-      toast.success(`Kept ${r.kept_hash ?? 'none'} · removed ${r.terminated} session(s)`)
+      const r = await Endpoints.logoutAll(account.id, null)
+      toast.success(`Buyer session kept · ${r.terminated} other session(s) removed`)
       onChange?.()
       setOpen(false)
     } catch (e) {
@@ -164,7 +159,7 @@ function SellAccount({ account, onChange }) {
           </div>
 
           <div className="nb-card-sm p-3">
-            <div className="micro-label mb-2">Sessions · keep one</div>
+            <div className="micro-label mb-2">Sessions · buyer is kept</div>
             {sessions.length === 0 && <div className="text-xs text-muted">No session data (account may be disconnected).</div>}
             <div className="space-y-1 max-h-56 overflow-auto pr-1">
               {sessions.map((s) => (
@@ -172,31 +167,28 @@ function SellAccount({ account, onChange }) {
                   key={s.hash}
                   className={
                     'flex items-center gap-2 rounded-xl border px-2 py-1.5 text-[11px] ' +
-                    (keep === s.hash ? 'border-[color:var(--ink)]' : 'border-[color:var(--hairline)]')
+                    (buyerHash === s.hash ? 'border-[color:var(--positive)]' : 'border-[color:var(--hairline)]')
                   }
                 >
-                  <input
-                    type="radio"
-                    name={`keep-${account.id}`}
-                    checked={keep === s.hash}
-                    onChange={() => setKeep(s.hash)}
-                  />
                   <span className="font-medium truncate">{s.device || s.app_name || 'Unknown'}</span>
                   <span className="text-muted truncate">{s.platform}</span>
                   {s.is_current && <span className="nb-badge bg-brand-ok">this app</span>}
-                  <button
-                    className="nb-btn-err !py-0.5 !px-2 text-[10px] ml-auto shrink-0"
-                    disabled={busy}
-                    onClick={() => logoutOne(s)}
-                  >
-                    {s.is_current ? 'Logout app' : 'Logout'}
-                  </button>
+                  {buyerHash === s.hash && <span className="nb-badge bg-brand-ok">buyer · kept</span>}
+                  {buyerHash !== s.hash && (
+                    <button
+                      className="nb-btn-err !py-0.5 !px-2 text-[10px] ml-auto shrink-0"
+                      disabled={busy}
+                      onClick={() => logoutOne(s)}
+                    >
+                      {s.is_current ? 'Logout app' : 'Logout'}
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
             <div className="text-[10px] text-muted mt-2">
-              Default: the newest other session (usually the buyer bot). It stays; every
-              other device is removed.
+              The newest device (last login) is treated as the buyer and can't be logged
+              out here. Every other device can be removed one by one, or all at once.
             </div>
           </div>
         </div>
