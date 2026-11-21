@@ -198,12 +198,36 @@ function SellAccount({ account, onChange }) {
 }
 
 export default function SellTab({ accounts, onChange }) {
+  const toast = useToast()
   const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const disconnected = accounts.filter((a) => a.status !== 'connected' && a.status !== 'banned')
+
+  async function removeDisconnected() {
+    if (!disconnected.length) return
+    if (!confirm(
+      `Remove ${disconnected.length} disconnected account(s) from TG Manager?\n\n` +
+      `Their session files and stored codes are deleted. Accounts still logged in ` +
+      `on Telegram are not affected.`
+    )) return
+    setBusy(true)
+    try {
+      const r = await Endpoints.removeDisconnected()
+      toast.success(`Removed ${r.removed} disconnected account(s)`)
+      onChange?.()
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return accounts
       .filter((a) => !a.has_2fa)
+      .filter((a) => a.status === 'connected')
       .filter((a) => {
         if (!needle) return true
         return `${a.first_name || ''} ${a.last_name || ''} ${a.phone || ''} ${a.username || ''}`
@@ -230,6 +254,11 @@ export default function SellTab({ accounts, onChange }) {
             placeholder="Search name, phone, country code or @username…"
           />
           <span className="nb-badge bg-white text-ink">{list.length} account(s)</span>
+          {disconnected.length > 0 && (
+            <button className="nb-btn-err !py-1 !px-3 text-xs" disabled={busy} onClick={removeDisconnected}>
+              {busy ? 'Removing…' : `Remove disconnected (${disconnected.length})`}
+            </button>
+          )}
         </div>
       </div>
 

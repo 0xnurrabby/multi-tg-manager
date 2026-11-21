@@ -103,6 +103,28 @@ async def remove_all_accounts(body: RemoveAllAccountsIn, db: AsyncSession = Depe
     return {"ok": True, "removed": removed}
 
 
+@router.post("/accounts/remove_disconnected")
+async def remove_disconnected_accounts(db: AsyncSession = Depends(get_db)):
+    """Delete every account that is not connected any more (not banned)."""
+    res = await db.execute(
+        select(Account).where(Account.status.notin_(["connected", "banned"]))
+    )
+    accounts = list(res.scalars().all())
+    for acc in accounts:
+        try:
+            await record_gone_account(db, acc, "removed")
+        except Exception:
+            pass
+        try:
+            await manager.remove_account_instance(acc)
+        except Exception:
+            pass
+        await db.delete(acc)
+    if accounts:
+        await db.commit()
+    return {"ok": True, "removed": len(accounts)}
+
+
 @router.get("/accounts/{account_id}", response_model=AccountOut)
 async def get_account(account_id: int, db: AsyncSession = Depends(get_db)):
     acc = await db.get(Account, account_id)

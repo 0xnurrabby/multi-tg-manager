@@ -116,6 +116,7 @@ export const Endpoints = {
   account: (id) => api.get(`/api/accounts/${id}`),
   deleteAccount: (id) => api.del(`/api/accounts/${id}`),
   removeAllAccounts: (password) => api.post('/api/accounts/remove_all', { password }),
+  removeDisconnected: () => api.post('/api/accounts/remove_disconnected'),
 
   // gone / banned account history
   goneAccounts: () => api.get('/api/gone_accounts'),
