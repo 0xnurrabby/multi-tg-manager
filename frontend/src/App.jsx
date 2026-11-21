@@ -14,6 +14,7 @@ import DashboardTab from './tabs/DashboardTab.jsx'
 import StatsTab from './tabs/StatsTab.jsx'
 import SecurityTab from './tabs/SecurityTab.jsx'
 import UrgentTab from './tabs/UrgentTab.jsx'
+import SellTab from './tabs/SellTab.jsx'
 import OperationsTab from './tabs/OperationsTab.jsx'
 import SettingsTab from './tabs/SettingsTab.jsx'
 
@@ -21,6 +22,7 @@ const TABS = [
   { id: 'dashboard',  label: 'Overview'   },
   { id: 'security',   label: 'Security'   },
   { id: 'urgent',     label: 'Urgent'     },
+  { id: 'sell',       label: 'For Sell'   },
   { id: 'operations', label: 'Operations' },
   { id: 'stats',      label: 'Insights'   },
   { id: 'settings',   label: 'Settings'   },
@@ -313,6 +315,7 @@ export default function App() {
                   {tab === 'stats'      && <StatsTab accounts={accounts} />}
                   {tab === 'security'   && <SecurityTab accounts={accounts} focusAlert={focusAlert} focusAccountId={selectedId} focusTick={selectTick} onChange={refreshStats} />}
                   {tab === 'urgent'     && <UrgentTab onChange={refreshStats} />}
+                  {tab === 'sell'       && <SellTab accounts={accounts} onChange={() => { refreshAccounts(); refreshStats() }} />}
                   {tab === 'operations' && <OperationsTab accounts={accounts} selected={selected} onDone={refreshAccounts} active={operationsTab} onChange={setOperationsTab} />}
                   {tab === 'settings'   && <SettingsTab />}
                 </>

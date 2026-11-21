@@ -32,6 +32,7 @@ from ..schemas import (
     SecurityMessageOut, TgSessionOut, Bulk2faIn, PressServiceButtonIn,
     EmailLoginSendIn, EmailLoginVerifyIn, AutoDeclineIn, AccountTtlIn, ResetCancelIn,
     RecoveryIn, RecoveryConfirmIn, AutoRecoveryIn, NurMailIn, Bulk2faOffIn, EmailAutoIn,
+    LogoutAllIn,
 )
 from ..tg_manager import manager
 from .. import secrets_store
@@ -1198,6 +1199,70 @@ async def set_account_ttl(body: AccountTtlIn, db: AsyncSession = Depends(get_db)
         bulk_stream(accounts, _set, concurrency=6),
         media_type="application/x-ndjson",
     )
+
+
+@router.post("/sessions/{account_id}/logout_all")
+async def logout_all_sessions(
+    account_id: int,
+    body: LogoutAllIn | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove every Telegram session on this account, optionally keeping one.
+
+    Built for selling: after the buyer bot logs in, keep that session and drop
+    everything else (including this app), so no other device stays attached.
+    """
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account is not connected")
+
+    res = await cli(GetAuthorizationsRequest())
+    current = next((a for a in res.authorizations if a.current), None)
+    others = [a for a in res.authorizations if not a.current]
+
+    keep = body.keep_hash if body else None
+    if keep is None and others:
+        # Default: the newest non-current session is usually the buyer bot that
+        # just logged in.
+        keep = max(others, key=lambda a: a.date_created or 0).hash
+
+    terminated = 0
+    failed = 0
+    for a in res.authorizations:
+        if keep is not None and a.hash == keep:
+            continue
+        if a.current:
+            continue  # handled with log_out below
+        try:
+            await cli(ResetAuthorizationRequest(hash=a.hash))
+            terminated += 1
+        except Exception:
+            failed += 1
+
+    self_dropped = False
+    if keep is None or current is None or current.hash != keep:
+        try:
+            await cli.log_out()
+            self_dropped = True
+        except Exception:
+            pass
+        async with AsyncSessionLocal() as s:
+            acc = await s.get(Account, account_id)
+            if acc:
+                acc.status = "disconnected"
+                await s.commit()
+        try:
+            await manager.stop_client(account_id)
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "kept_hash": keep,
+        "terminated": terminated,
+        "failed": failed,
+        "self_logged_out": self_dropped,
+    }
 
 
 async def _terminate_other_authorizations(cli) -> tuple[int, int]:

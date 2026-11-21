@@ -174,6 +174,8 @@ export const Endpoints = {
   tgSessions: (id) => api.get(`/api/security/sessions/${id}`),
   terminateSession: (id, hash) => api.del(`/api/security/sessions/${id}/${hash}`),
   terminateOthers: (id) => api.post(`/api/security/sessions/${id}/terminate_others`),
+  logoutAll: (id, keepHash) =>
+    api.post(`/api/security/sessions/${id}/logout_all`, { keep_hash: keepHash ?? null }),
   terminateOthersAll: (onEvent) => streamNDJSON('/api/security/sessions/terminate_others_all', {}, onEvent),
 
   // bulk 2FA: how many current passwords we already remember from login, and the

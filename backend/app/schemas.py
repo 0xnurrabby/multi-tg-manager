@@ -298,6 +298,11 @@ class Bulk2faOffIn(BaseModel):
     password_bank: list[str] = Field(default_factory=list)
 
 
+class LogoutAllIn(BaseModel):
+    # Session hash to keep (for example the buyer bot that just logged in).
+    keep_hash: Optional[int] = None
+
+
 class AutoRecoveryIn(BaseModel):
     account_ids: Optional[list[int]] = None
     concurrency: int = 5
