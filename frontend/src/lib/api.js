@@ -176,6 +176,7 @@ export const Endpoints = {
   terminateOthers: (id) => api.post(`/api/security/sessions/${id}/terminate_others`),
   logoutAll: (id, keepHash) =>
     api.post(`/api/security/sessions/${id}/logout_all`, { keep_hash: keepHash ?? null }),
+  logoutSelf: (id) => api.post(`/api/security/sessions/${id}/logout_self`),
   terminateOthersAll: (onEvent) => streamNDJSON('/api/security/sessions/terminate_others_all', {}, onEvent),
 
   // bulk 2FA: how many current passwords we already remember from login, and the

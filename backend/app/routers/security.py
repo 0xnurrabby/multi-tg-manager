@@ -1201,6 +1201,28 @@ async def set_account_ttl(body: AccountTtlIn, db: AsyncSession = Depends(get_db)
     )
 
 
+@router.post("/sessions/{account_id}/logout_self")
+async def logout_self_session(account_id: int, db: AsyncSession = Depends(get_db)):
+    """Log this app's session out, leaving every other device alone."""
+    cli = manager.get(account_id)
+    if not cli:
+        raise HTTPException(409, "Account is not connected")
+    try:
+        await cli.log_out()
+    except Exception as e:
+        raise HTTPException(400, friendly_error(e)) from None
+    async with AsyncSessionLocal() as s:
+        acc = await s.get(Account, account_id)
+        if acc:
+            acc.status = "disconnected"
+            await s.commit()
+    try:
+        await manager.stop_client(account_id)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @router.post("/sessions/{account_id}/logout_all")
 async def logout_all_sessions(
     account_id: int,

@@ -71,6 +71,34 @@ function SellAccount({ account, onChange }) {
     }
   }
 
+  async function logoutOne(session) {
+    const label = session.is_current
+      ? 'this app (TG Manager)'
+      : `${session.device || session.app_name || 'this device'} (${session.platform || '?'})`
+    if (!confirm(
+      session.is_current
+        ? `Log ${account.phone} out of this app only? Other devices stay logged in.`
+        : `Remove ${label} from ${account.phone}?`
+    )) return
+    setBusy(true)
+    try {
+      if (session.is_current) {
+        await Endpoints.logoutSelf(account.id)
+        toast.success('Logged out of this app')
+        onChange?.()
+        setOpen(false)
+      } else {
+        await Endpoints.terminateSession(account.id, session.hash)
+        toast.success('Session removed')
+        await load()
+      }
+    } catch (e) {
+      toast.error(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="nb-card p-4 mb-3">
       <div className="flex items-center gap-3 flex-wrap">
@@ -140,10 +168,10 @@ function SellAccount({ account, onChange }) {
             {sessions.length === 0 && <div className="text-xs text-muted">No session data (account may be disconnected).</div>}
             <div className="space-y-1 max-h-56 overflow-auto pr-1">
               {sessions.map((s) => (
-                <label
+                <div
                   key={s.hash}
                   className={
-                    'flex items-center gap-2 rounded-xl border px-2 py-1.5 text-[11px] cursor-pointer ' +
+                    'flex items-center gap-2 rounded-xl border px-2 py-1.5 text-[11px] ' +
                     (keep === s.hash ? 'border-[color:var(--ink)]' : 'border-[color:var(--hairline)]')
                   }
                 >
@@ -156,7 +184,14 @@ function SellAccount({ account, onChange }) {
                   <span className="font-medium truncate">{s.device || s.app_name || 'Unknown'}</span>
                   <span className="text-muted truncate">{s.platform}</span>
                   {s.is_current && <span className="nb-badge bg-brand-ok">this app</span>}
-                </label>
+                  <button
+                    className="nb-btn-err !py-0.5 !px-2 text-[10px] ml-auto shrink-0"
+                    disabled={busy}
+                    onClick={() => logoutOne(s)}
+                  >
+                    {s.is_current ? 'Logout app' : 'Logout'}
+                  </button>
+                </div>
               ))}
             </div>
             <div className="text-[10px] text-muted mt-2">
