@@ -256,6 +256,54 @@ async def cancel_reset_request(
     return {"ok": True, "account_id": msg.account_id, "message": "Deletion cancelled"}
 
 
+@router.post("/age/scan")
+async def scan_account_age(limit: int = 0, db: AsyncSession = Depends(get_db)):
+    """Guess each account's age from its oldest Telegram (777000) message.
+
+    Telegram never exposes a registration date, but the first service message in
+    the official Telegram chat is the closest real data we can read.
+    """
+    res = await db.execute(
+        select(Account).where(Account.status != "banned").order_by(Account.id)
+    )
+    accounts = [
+        (a.id, a.phone, (f"{a.first_name or ''} {a.last_name or ''}".strip() or a.phone))
+        for a in res.scalars().all()
+    ]
+    if limit > 0:
+        accounts = accounts[:limit]
+
+    async def _one(cli, aid):
+        first = None
+        try:
+            msgs = await cli.get_messages(777000, limit=1, reverse=True)
+            if msgs:
+                first = msgs[0]
+        except Exception:
+            first = None
+        if first is None:
+            try:
+                msgs = await cli.get_messages(777000, limit=100)
+                if msgs:
+                    first = msgs[-1]
+            except Exception:
+                first = None
+        if first is None or not getattr(first, "date", None):
+            raise ValueError("no Telegram service messages")
+        when = first.date.replace(tzinfo=None)
+        async with AsyncSessionLocal() as s:
+            acc = await s.get(Account, aid)
+            if acc:
+                acc.tg_since = when
+                await s.commit()
+        return "ok", when.strftime("%Y-%m-%d")
+
+    return StreamingResponse(
+        bulk_stream(accounts, _one, concurrency=8),
+        media_type="application/x-ndjson",
+    )
+
+
 @router.get("/auto_decline")
 async def get_auto_decline(db: AsyncSession = Depends(get_db)):
     return {"enabled": await _auto_decline_enabled(db)}

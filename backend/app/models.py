@@ -23,6 +23,8 @@ class Account(Base):
     login_email_address: Mapped[str] = mapped_column(String(255), default="")
     # Recovery email we set (or last saw) — Telegram never returns the confirmed one.
     recovery_email: Mapped[str] = mapped_column(String(255), default="")
+    # Oldest Telegram (777000) service message date, used as the account-age guess.
+    tg_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     email_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=False)
     last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

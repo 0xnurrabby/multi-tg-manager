@@ -21,6 +21,8 @@ class AccountOut(BaseModel):
     last_seen: Optional[datetime] = None
     unread_security: int = 0
     created_at: Optional[datetime] = None
+    # Oldest Telegram service message (user 777000) — a proxy for account age.
+    tg_since: Optional[datetime] = None
 
     class Config:
         from_attributes = True

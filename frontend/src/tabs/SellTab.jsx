@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import { fmtTime, ageLabel } from '../lib/util'
+import { fmtTime, accountAge } from '../lib/util'
+import ProgressModal from '../components/ProgressModal.jsx'
+import { useBulkProgress } from '../lib/useBulkProgress'
 import { CopyButton } from '../lib/CopyButton'
 
 const CODE_RE = /\b(\d{5,6})\b/
@@ -110,8 +112,8 @@ function SellAccount({ account, onChange }) {
               </>
             )}
             <span className="nb-badge bg-brand-warn">2FA off</span>
-            {ageLabel(account.created_at) && (
-              <span className="nb-badge bg-white text-ink" title={account.created_at}>{ageLabel(account.created_at)}</span>
+            {accountAge(account) && (
+              <span className="nb-badge bg-white text-ink" title={account.tg_since || account.created_at}>{accountAge(account)}</span>
             )}
             {code && <span className="nb-badge bg-brand-ok font-mono">OTP {code}</span>}
           </div>
@@ -209,8 +211,22 @@ function SellAccount({ account, onChange }) {
 
 export default function SellTab({ accounts, onChange }) {
   const toast = useToast()
+  const { progress, run, close } = useBulkProgress()
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
+  const [scanBusy, setScanBusy] = useState(false)
+
+  async function scanAges() {
+    if (!accounts.length) return
+    setScanBusy(true)
+    try {
+      await run(`Telegram account age ? ${accounts.length} accounts`, (onEvent) =>
+        Endpoints.scanAges(onEvent))
+      onChange?.()
+    } finally {
+      setScanBusy(false)
+    }
+  }
 
   const disconnected = accounts.filter((a) => a.status !== 'connected' && a.status !== 'banned')
 
@@ -264,6 +280,9 @@ export default function SellTab({ accounts, onChange }) {
             placeholder="Search name, phone, country code or @username…"
           />
           <span className="nb-badge bg-white text-ink">{list.length} account(s)</span>
+          <button className="nb-btn !py-1 !px-3 text-xs" disabled={scanBusy} onClick={scanAges}>
+            {scanBusy ? 'Scanning?' : 'Scan Telegram age'}
+          </button>
           {disconnected.length > 0 && (
             <button className="nb-btn-err !py-1 !px-3 text-xs" disabled={busy} onClick={removeDisconnected}>
               {busy ? 'Removing…' : `Remove disconnected (${disconnected.length})`}
@@ -285,6 +304,8 @@ export default function SellTab({ accounts, onChange }) {
       {list.map((a) => (
         <SellAccount key={a.id} account={a} onChange={onChange} />
       ))}
+
+      <ProgressModal progress={progress} onClose={close} />
     </div>
   )
 }

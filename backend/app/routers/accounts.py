@@ -46,6 +46,7 @@ async def _account_to_out(acc: Account, db: AsyncSession, unread: int | None = N
         last_seen=acc.last_seen,
         unread_security=unread or 0,
         created_at=acc.created_at,
+        tg_since=acc.tg_since,
     )
 
 
@@ -68,6 +69,7 @@ def _account_fallback(acc: Account) -> AccountOut:
         last_seen=acc.last_seen,
         unread_security=0,
         created_at=acc.created_at,
+        tg_since=acc.tg_since,
     )
 
 

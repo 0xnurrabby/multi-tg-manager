@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import { fmtTime, ageLabel } from '../lib/util'
+import { fmtTime, accountAge } from '../lib/util'
 import ProgressModal from '../components/ProgressModal.jsx'
 import LoginEmailCard from '../components/LoginEmailCard.jsx'
 import RecoveryEmailCard from '../components/RecoveryEmailCard.jsx'
@@ -641,7 +641,7 @@ function Bulk2faPanel({ accounts, onChange }) {
                   <input type="checkbox" className="shrink-0" checked={ids.includes(a.id)} onChange={() => toggle(a.id)} />
                   <span className="truncate">{((a.first_name || '') + ' ' + (a.last_name || '')).trim() || a.phone}</span>
                   <span className="text-[10px] font-mono text-muted truncate">{a.phone}</span>
-                  <span className="text-[9px] font-mono text-muted shrink-0">{ageLabel(a.created_at)}</span>
+                  <span className="text-[9px] font-mono text-muted shrink-0">{accountAge(a)}</span>
                   {a.has_2fa
                     ? <span className="text-[9px] font-mono text-brand-info ml-auto shrink-0" title="already has 2FA">2FA</span>
                     : <span className="text-[9px] font-mono text-muted ml-auto shrink-0" title="no 2FA yet">off</span>}
@@ -798,7 +798,7 @@ function EmailSetupPanel({ accounts, onChange }) {
               <input type="checkbox" className="shrink-0" checked={ids.includes(a.id)} onChange={() => toggle(a.id)} />
               <span className="truncate">{((a.first_name || '') + ' ' + (a.last_name || '')).trim() || a.phone}</span>
               <span className="text-[10px] font-mono text-muted truncate">{a.phone}</span>
-              <span className="text-[9px] font-mono text-muted shrink-0">{ageLabel(a.created_at)}</span>
+              <span className="text-[9px] font-mono text-muted shrink-0">{accountAge(a)}</span>
             </label>
           ))}
           {filtered.length === 0 && (

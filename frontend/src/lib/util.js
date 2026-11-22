@@ -70,8 +70,22 @@ export function ageLabel(value) {
   if (!d) return ''
   const days = Math.floor((Date.now() - d.getTime()) / 86400000)
   if (days <= 0) return 'today'
-  if (days < 365) return `${days}d old`
-  return `${Math.floor(days / 365)}y old`
+  if (days < 31) return `${days}d`
+  const months = Math.floor(days / 30.44)
+  if (months < 12) return `${months}mo`
+  const years = Math.floor(months / 12)
+  const rem = months % 12
+  return rem ? `${years}y ${rem}mo` : `${years}y`
+}
+
+// Age shown next to accounts: prefer the oldest Telegram (777000) message
+// (? real account age), fall back to when it was added here.
+export function accountAge(a) {
+  if (!a) return ''
+  const fromTelegram = !!a.tg_since
+  const label = ageLabel(fromTelegram ? a.tg_since : a.created_at)
+  if (!label) return ''
+  return fromTelegram ? `≈ ${label}` : label
 }
 
 export function colorForString(s) {

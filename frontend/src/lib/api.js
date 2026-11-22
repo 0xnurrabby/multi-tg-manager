@@ -208,6 +208,7 @@ export const Endpoints = {
   testNurmail: () => api.post('/api/security/nurmail/test'),
   autoRecovery: (payload, onEvent) =>
     streamNDJSON('/api/security/recovery/auto', payload, onEvent),
+  scanAges: (onEvent) => streamNDJSON('/api/security/age/scan', {}, onEvent),
   autoEmail: (payload, onEvent) =>
     streamNDJSON('/api/security/email/auto', payload, onEvent),
 

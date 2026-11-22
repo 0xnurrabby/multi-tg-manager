@@ -72,6 +72,8 @@ async def _migrate_sqlite(conn):
         await conn.exec_driver_sql(
             "ALTER TABLE accounts ADD COLUMN recovery_email VARCHAR(255) DEFAULT ''"
         )
+    if "tg_since" not in account_cols:
+        await conn.exec_driver_sql("ALTER TABLE accounts ADD COLUMN tg_since DATETIME")
 
     res = await conn.exec_driver_sql("PRAGMA table_info('ai_chat_messages')")
     ai_cols = {row[1] for row in res.all()}
