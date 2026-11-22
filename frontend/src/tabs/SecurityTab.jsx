@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import { fmtTime, accountAge } from '../lib/util'
+import { fmtTime, accountAge, sortByAge } from '../lib/util'
 import ProgressModal from '../components/ProgressModal.jsx'
 import LoginEmailCard from '../components/LoginEmailCard.jsx'
 import RecoveryEmailCard from '../components/RecoveryEmailCard.jsx'
@@ -427,12 +427,12 @@ function Bulk2faPanel({ accounts, onChange }) {
   }, [open])
 
   const q = query.trim().toLowerCase()
-  const filtered = q
+  const filtered = sortByAge(q
     ? accounts.filter((a) =>
         `${a.first_name || ''} ${a.last_name || ''} ${a.phone || ''} ${a.username || ''}`
           .toLowerCase()
           .includes(q))
-    : accounts
+    : accounts)
 
   const allChecked = filtered.length > 0 && filtered.every((a) => ids.includes(a.id))
   const no2fa = filtered.filter((a) => !a.has_2fa)
@@ -680,12 +680,12 @@ function EmailSetupPanel({ accounts, onChange }) {
 
   const connected = accounts.filter((a) => a.status === 'connected')
   const q = query.trim().toLowerCase()
-  const filtered = q
+  const filtered = sortByAge(q
     ? connected.filter((a) =>
         `${a.first_name || ''} ${a.last_name || ''} ${a.phone || ''} ${a.username || ''}`
           .toLowerCase()
           .includes(q))
-    : connected
+    : connected)
   const allChecked = filtered.length > 0 && filtered.every((a) => ids.includes(a.id))
   const targetCount = ids.length || connected.length
 

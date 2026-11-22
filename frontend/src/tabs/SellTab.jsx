@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import { fmtTime, accountAge } from '../lib/util'
+import { fmtTime, accountAge, sortByAge } from '../lib/util'
 import ProgressModal from '../components/ProgressModal.jsx'
 import { useBulkProgress } from '../lib/useBulkProgress'
 import { CopyButton } from '../lib/CopyButton'
@@ -251,7 +251,7 @@ export default function SellTab({ accounts, onChange }) {
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    return accounts
+    return sortByAge(accounts
       .filter((a) => !a.has_2fa)
       .filter((a) => a.status === 'connected')
       .filter((a) => {
@@ -259,7 +259,7 @@ export default function SellTab({ accounts, onChange }) {
         return `${a.first_name || ''} ${a.last_name || ''} ${a.phone || ''} ${a.username || ''}`
           .toLowerCase()
           .includes(needle)
-      })
+      }))
   }, [accounts, q])
 
   return (

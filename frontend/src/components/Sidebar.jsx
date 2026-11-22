@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { CopyButton } from '../lib/CopyButton'
-import { accountAge } from '../lib/util'
+import { accountAge, sortByAge } from '../lib/util'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { fmtDate } from '../lib/util'
@@ -47,9 +47,9 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
   const active = accounts.filter((a) => a.status !== 'banned')
   const totalAccounts = accounts.length
   const q = query.trim().toLowerCase()
-  const filtered = q
+  const filtered = sortByAge(q
     ? active.filter((a) => `${a.first_name} ${a.last_name} ${a.username} ${a.phone}`.toLowerCase().includes(q))
-    : active
+    : active)
   const shown = filtered.slice(0, listLimit)
 
   async function confirmDelete() {

@@ -88,6 +88,16 @@ export function accountAge(a) {
   return fromTelegram ? `≈ ${label}` : label
 }
 
+export function ageTimestamp(a) {
+  const d = parseApiDate(a?.tg_since || a?.created_at)
+  return d ? d.getTime() : Number.MAX_SAFE_INTEGER
+}
+
+// Oldest account first; unscanned accounts (no date) go to the bottom.
+export function sortByAge(list) {
+  return list.slice().sort((a, b) => ageTimestamp(a) - ageTimestamp(b))
+}
+
 export function colorForString(s) {
   let h = 0
   for (const c of s || '') h = (h * 31 + c.charCodeAt(0)) % 360
