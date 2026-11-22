@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
-import { fmtTime } from '../lib/util'
+import { fmtTime, ageLabel } from '../lib/util'
 import { CopyButton } from '../lib/CopyButton'
 
 const CODE_RE = /\b(\d{5,6})\b/
@@ -110,6 +110,9 @@ function SellAccount({ account, onChange }) {
               </>
             )}
             <span className="nb-badge bg-brand-warn">2FA off</span>
+            {ageLabel(account.created_at) && (
+              <span className="nb-badge bg-white text-ink" title={account.created_at}>{ageLabel(account.created_at)}</span>
+            )}
             {code && <span className="nb-badge bg-brand-ok font-mono">OTP {code}</span>}
           </div>
           <div className="text-[10px] text-muted mt-1">

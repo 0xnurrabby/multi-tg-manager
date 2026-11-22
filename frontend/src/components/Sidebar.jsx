@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { CopyButton } from '../lib/CopyButton'
+import { ageLabel } from '../lib/util'
 import { Endpoints } from '../lib/api'
 import { useToast } from '../lib/toast.jsx'
 import { fmtDate } from '../lib/util'
@@ -180,6 +181,9 @@ export default function Sidebar({ accounts, gone = [], selectedId, onSelect, onA
                 )}
                 <div className="flex items-center gap-2 mt-2">
                   {a.has_2fa && <span className="nb-badge bg-brand-violet">2FA</span>}
+                  {ageLabel(a.created_at) && (
+                    <span className="nb-badge bg-white text-ink" title={a.created_at}>{ageLabel(a.created_at)}</span>
+                  )}
                   {a.unread_security > 0 && (
                     <span className="nb-badge bg-brand-err">{a.unread_security} new</span>
                   )}

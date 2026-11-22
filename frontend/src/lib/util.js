@@ -64,6 +64,18 @@ export function fmtDate(iso) {
   return formatInTimeZone(iso, { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+// Human "how old is this account" label used next to every account row.
+export function ageLabel(value) {
+  const d = parseApiDate(value)
+  if (!d) return ''
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000)
+  if (days <= 0) return 'today'
+  if (days < 30) return `${days}d old`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo old`
+  return `${Math.floor(days / 365)}y old`
+}
+
 export function colorForString(s) {
   let h = 0
   for (const c of s || '') h = (h * 31 + c.charCodeAt(0)) % 360
