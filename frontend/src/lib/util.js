@@ -70,9 +70,7 @@ export function ageLabel(value) {
   if (!d) return ''
   const days = Math.floor((Date.now() - d.getTime()) / 86400000)
   if (days <= 0) return 'today'
-  if (days < 30) return `${days}d old`
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months}mo old`
+  if (days < 365) return `${days}d old`
   return `${Math.floor(days / 365)}y old`
 }
 
